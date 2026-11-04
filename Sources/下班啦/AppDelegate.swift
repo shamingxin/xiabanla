@@ -1,0 +1,275 @@
+import AppKit
+import SwiftUI
+import Combine
+
+@main
+enum XiabanlaMain {
+    static func main() {
+        let app = NSApplication.shared
+        let delegate = AppDelegate()
+        app.delegate = delegate
+        app.setActivationPolicy(.regular)
+        withExtendedLifetime(delegate) { app.run() }
+    }
+}
+
+/// 管理菜单栏图标、菜单栏浮层、桌面小窗和设置窗口
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let model = WorkTimerModel()
+    private lazy var reminders = ReminderModel(work: model)
+    private let bubble = BubbleController()
+    private var statusItem: NSStatusItem!
+    private var popover: WidgetPanel?
+    private var desktop: WidgetWindow?
+    private var settingsWindow: NSWindow?
+    private var cancellables = Set<AnyCancellable>()
+    private var monitors: [Any] = []
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.appearance = NSAppearance(named: .darkAqua)
+        buildMainMenu()
+        setupStatusItem()
+        showDesktopWindow()
+        model.objectWillChange
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.updateStatusItem() } }
+            .store(in: &cancellables)
+        updateStatusItem()
+        setupReminders()
+    }
+
+    // MARK: - 提醒气泡
+
+    private func setupReminders() {
+        bubble.anchorProvider = { [weak self] in self?.statusItemScreenFrame() }
+        reminders.present = { [weak self] url, force in
+            self?.bubble.show(videoURL: url, force: force) ?? false
+        }
+        reminders.start()
+    }
+
+    /// 菜单栏图标在屏幕上的位置；图标被系统隐藏时返回 nil
+    private func statusItemScreenFrame() -> NSRect? {
+        guard let button = statusItem.button, let window = button.window,
+              window.isVisible, window.occlusionState.contains(.visible) else { return nil }
+        let frame = window.convertToScreen(button.convert(button.bounds, to: nil))
+        return frame.width > 0 ? frame : nil
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showDesktopWindow()
+        return true
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    // MARK: - 卡片
+
+    private func actions(forDesktop: Bool) -> CardActions {
+        CardActions(
+            openSettings: { [weak self] in self?.openSettings() },
+            showWindow: { [weak self] in self?.showDesktopWindow() },
+            closeWindow: forDesktop ? { [weak self] in self?.desktop?.orderOut(nil) } : nil,
+            minimizeWindow: forDesktop ? { [weak self] in self?.desktop?.miniaturize(nil) } : nil,
+            quit: { NSApp.terminate(nil) }
+        )
+    }
+
+    private func makeController(forDesktop: Bool) -> NSHostingController<WidgetContainer<CountdownCardView>> {
+        let model = self.model
+        let actions = self.actions(forDesktop: forDesktop)
+        let controller = NSHostingController(rootView: WidgetContainer {
+            CountdownCardView(model: model, actions: actions)
+        })
+        controller.sizingOptions = [.preferredContentSize]
+        return controller
+    }
+
+    private func install(_ controller: NSViewController, in window: NSWindow) {
+        let size = controller.view.fittingSize
+        window.contentViewController = controller
+        window.setContentSize(size)
+    }
+
+    private func makePopover() -> WidgetPanel {
+        let panel = WidgetPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel],
+                                backing: .buffered, defer: false)
+        install(makeController(forDesktop: false), in: panel)
+        return panel
+    }
+
+    // MARK: - 桌面小窗
+
+    @objc private func showDesktopWindow() {
+        if desktop == nil {
+            let window = WidgetWindow(contentRect: .zero, styleMask: [.borderless, .miniaturizable],
+                                      backing: .buffered, defer: false)
+            install(makeController(forDesktop: true), in: window)
+            window.title = "下班啦"
+            window.isMovableByWindowBackground = true
+            let size = window.frame.size
+            if window.setFrameUsingName("DesktopWidget") {
+                window.setContentSize(size)
+            } else {
+                window.center()
+            }
+            window.setFrameAutosaveName("DesktopWidget")
+            desktop = window
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        if desktop?.isMiniaturized == true { desktop?.deminiaturize(nil) }
+        desktop?.makeKeyAndOrderFront(nil)
+        desktop?.invalidateShadow()
+    }
+
+    // MARK: - 菜单栏
+
+    private func setupStatusItem() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        guard let button = statusItem.button else { return }
+        if let url = Bundle.main.url(forResource: "MenuBarIcon", withExtension: "png"),
+           let image = NSImage(contentsOf: url) {
+            image.size = NSSize(width: 18, height: 18)
+            button.image = image
+        } else {
+            button.image = NSImage(systemSymbolName: "clock", accessibilityDescription: "下班啦")
+        }
+        button.imagePosition = .imageLeft
+        button.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        button.target = self
+        button.action = #selector(statusItemClicked(_:))
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+    }
+
+    private func updateStatusItem() {
+        let text: String
+        if !model.hasStarted { text = "未开始" }
+        else if model.isOffWork { text = "已下班" }
+        else { text = "下班倒计时：" + model.compactRemainingText }
+        statusItem.button?.title = " " + text
+    }
+
+    @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
+        if NSApp.currentEvent?.type == .rightMouseUp {
+            closePopover()
+            let menu = NSMenu()
+            menu.addItem(menuItem("设置…", #selector(openSettings)))
+            menu.addItem(menuItem("显示桌面小窗", #selector(showDesktopWindow)))
+            menu.addItem(.separator())
+            menu.addItem(NSMenuItem(title: "退出下班啦", action: #selector(NSApplication.terminate(_:)), keyEquivalent: ""))
+            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 4), in: sender)
+            return
+        }
+        if let panel = popover, panel.isVisible { closePopover() } else { openPopover() }
+    }
+
+    private func openPopover() {
+        let panel = popover ?? makePopover()
+        panel.level = .statusBar
+        panel.collectionBehavior = [.canJoinAllSpaces, .transient, .ignoresCycle]
+        popover = panel
+        positionPopover(panel)
+        panel.makeKeyAndOrderFront(nil)
+        panel.invalidateShadow()
+        addMonitors()
+    }
+
+    /// 浮层放在菜单栏图标正下方，不超出屏幕
+    private func positionPopover(_ panel: NSWindow) {
+        guard let button = statusItem.button, let buttonWindow = button.window else { return }
+        let buttonFrame = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
+        let size = panel.frame.size
+        let visible = (buttonWindow.screen ?? NSScreen.main)?.visibleFrame ?? .zero
+        var x = buttonFrame.midX - size.width / 2
+        x = min(max(x, visible.minX + 8), visible.maxX - size.width - 8)
+        panel.setFrameOrigin(NSPoint(x: x, y: buttonFrame.minY - 6 - size.height))
+    }
+
+    /// 点击浮层以外的地方时收起浮层
+    private func addMonitors() {
+        removeMonitors()
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] _ in
+            self?.closePopover()
+        }) { monitors.append(global) }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] event in
+            guard let self else { return event }
+            if event.window !== self.popover && event.window !== self.statusItem.button?.window {
+                self.closePopover()
+            }
+            return event
+        }) { monitors.append(local) }
+    }
+
+    private func removeMonitors() {
+        monitors.forEach(NSEvent.removeMonitor)
+        monitors.removeAll()
+    }
+
+    private func closePopover() {
+        popover?.orderOut(nil)
+        removeMonitors()
+    }
+
+    // MARK: - 设置窗口
+
+    @objc func openSettings() {
+        closePopover()
+        if settingsWindow == nil {
+            // 固定尺寸窗口：不让窗口跟随 SwiftUI 内容尺寸变化，避免布局循环导致崩溃
+            let hosting = NSHostingView(rootView: SettingsView(model: model, reminders: reminders))
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 560),
+                                  styleMask: [.titled, .closable],
+                                  backing: .buffered, defer: false)
+            window.contentView = hosting
+            window.title = "下班啦设置"
+            // 标题栏与面板背景同色（#222120），避免标题栏和内容区出现色差
+            window.titlebarAppearsTransparent = true
+            window.backgroundColor = NSColor(srgbRed: 0x22 / 255, green: 0x21 / 255, blue: 0x20 / 255, alpha: 1)
+            window.isReleasedWhenClosed = false
+            window.center()
+            settingsWindow = window
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        settingsWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    // MARK: - 主菜单（⌘, 设置、⌘W 关闭、编辑快捷键）
+
+    private func menuItem(_ title: String, _ action: Selector, _ key: String = "") -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        item.target = self
+        return item
+    }
+
+    private func buildMainMenu() {
+        let main = NSMenu()
+
+        let appMenu = NSMenu()
+        appMenu.addItem(menuItem("设置…", #selector(openSettings), ","))
+        appMenu.addItem(menuItem("显示桌面小窗", #selector(showDesktopWindow), "0"))
+        appMenu.addItem(.separator())
+        appMenu.addItem(NSMenuItem(title: "隐藏下班啦", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h"))
+        appMenu.addItem(NSMenuItem(title: "退出下班啦", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        let appItem = NSMenuItem()
+        appItem.submenu = appMenu
+        main.addItem(appItem)
+
+        let edit = NSMenu(title: "编辑")
+        edit.addItem(NSMenuItem(title: "撤销", action: Selector(("undo:")), keyEquivalent: "z"))
+        edit.addItem(.separator())
+        edit.addItem(NSMenuItem(title: "剪切", action: #selector(NSText.cut(_:)), keyEquivalent: "x"))
+        edit.addItem(NSMenuItem(title: "拷贝", action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
+        edit.addItem(NSMenuItem(title: "粘贴", action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
+        edit.addItem(NSMenuItem(title: "全选", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
+        let editItem = NSMenuItem()
+        editItem.submenu = edit
+        main.addItem(editItem)
+
+        let window = NSMenu(title: "窗口")
+        window.addItem(NSMenuItem(title: "关闭", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"))
+        let windowItem = NSMenuItem()
+        windowItem.submenu = window
+        main.addItem(windowItem)
+
+        NSApp.mainMenu = main
+    }
+}

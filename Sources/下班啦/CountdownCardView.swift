@@ -1,0 +1,395 @@
+import SwiftUI
+import AppKit
+
+extension AppTheme {
+    var accentColor: Color {
+        switch self {
+        case .green: return Color(red: 0.30, green: 0.78, blue: 0.40)
+        case .blue: return Color(red: 0.25, green: 0.55, blue: 0.95)
+        case .orange: return Color(red: 0.95, green: 0.60, blue: 0.20)
+        case .purple: return Color(red: 0.60, green: 0.40, blue: 0.90)
+        }
+    }
+}
+
+/// 配色：全部用半透明色，叠在毛玻璃上，浅色/深色桌面下都能看清
+enum Palette {
+    static let digit = Color(white: 0.93)
+    static let label = Color.white.opacity(0.75)
+    static let faint = Color.white.opacity(0.66)
+    /// 数字牌：半透明黑，透出背后的毛玻璃
+    static let tile = Color.black.opacity(0.32)
+    /// 进度条底轨：半透明黑
+    static let track = Color.black.opacity(0.32)
+    static let hover = Color.white.opacity(0.14)
+}
+
+/// 布局尺寸
+enum Metrics {
+    static let tileSize: CGFloat = 88
+    static let tileGap: CGFloat = 12
+    static let tileRadius: CGFloat = 12
+    /// 数字牌上下两半之间的缝隙，透出背景
+    static let splitGap: CGFloat = 2
+    static let digitFontSize: CGFloat = 76
+    static let horizontalPadding: CGFloat = 24
+    static let verticalPadding: CGFloat = 28
+}
+
+/// 卡片上可触发的操作，由 AppDelegate 提供
+struct CardActions {
+    var openSettings: () -> Void = {}
+    var showWindow: () -> Void = {}
+    /// 只有桌面小窗才有关闭/最小化；为 nil 时不显示红黄绿按钮
+    var closeWindow: (() -> Void)? = nil
+    var minimizeWindow: (() -> Void)? = nil
+    var quit: () -> Void = { NSApp.terminate(nil) }
+}
+
+/// 倒计时主视图
+/// - 未开始：数字牌显示 --，下方「开始上班」按钮 + 补填到岗时间入口
+/// - 倒计时中：时/分/秒三块翻页数字牌 + 进度条 + 到岗/下班时间
+/// - 已下班：主题色数字 + 「已下班 · 今天辛苦了。」
+struct CountdownCardView: View {
+    @ObservedObject var model: WorkTimerModel
+    var actions = CardActions()
+
+    private var digitColor: Color {
+        model.isOffWork ? model.theme.accentColor : Palette.digit
+    }
+
+    /// 时、分、秒三段文字
+    private var parts: (String, String, String) {
+        if !model.hasStarted { return ("--", "--", "--") }
+        let s = model.remainingSeconds
+        return (String(format: "%02d", s / 3600),
+                String(format: "%02d", (s % 3600) / 60),
+                String(format: "%02d", s % 60))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 14) {
+                if let close = actions.closeWindow {
+                    WindowControls(close: close, minimize: actions.minimizeWindow)
+                }
+                header
+            }
+            HStack(spacing: Metrics.tileGap) {
+                FlipTile(value: parts.0, color: digitColor, label: "小时")
+                FlipTile(value: parts.1, color: digitColor, label: "分钟")
+                FlipTile(value: parts.2, color: digitColor, label: "秒")
+            }
+            if model.hasStarted {
+                progressFooter
+            } else {
+                startFooter
+            }
+        }
+        .padding(.horizontal, Metrics.horizontalPadding)
+        .padding(.top, actions.closeWindow != nil ? 16 : Metrics.verticalPadding)
+        .padding(.bottom, Metrics.verticalPadding)
+        .fixedSize()
+        .environment(\.colorScheme, .dark)
+        .animation(.easeInOut(duration: 0.3), value: model.isOffWork)
+        .contextMenu {
+            Button("设置…", action: actions.openSettings)
+            Button("显示桌面小窗", action: actions.showWindow)
+            if let close = actions.closeWindow {
+                Button("关闭桌面小窗", action: close)
+            }
+            Divider()
+            Button("退出下班啦", action: actions.quit)
+        }
+    }
+
+    // MARK: - 顶部：状态文字 + 右上角设置
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            if model.isOffWork {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(model.theme.accentColor)
+                Text("已下班 · 今天辛苦了。")
+                    .foregroundStyle(model.theme.accentColor)
+            } else {
+                Image(systemName: "clock")
+                    .foregroundStyle(Palette.label)
+                Text(model.hasStarted ? "距离下班" : "还没开始上班")
+                    .foregroundStyle(Palette.label)
+            }
+            Spacer()
+            SettingsGearButton(action: actions.openSettings)
+        }
+        .font(.system(size: 14, weight: .medium))
+    }
+
+    // MARK: - 底部：未开始
+
+    private var startFooter: some View {
+        VStack(spacing: 12) {
+            Button(action: { model.startWork() }) {
+                Text("开始上班")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(Palette.digit)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 38)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(Palette.digit, lineWidth: 1.5)
+                    )
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            HStack(spacing: 4) {
+                Text("忘了点？").foregroundStyle(Palette.faint)
+                Button("补填今天的到岗时间", action: actions.openSettings)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Palette.label)
+                    .underline()
+            }
+            .font(.system(size: 12, weight: .medium))
+        }
+    }
+
+    // MARK: - 底部：进度条 + 到岗/下班时间 + 百分比
+
+    private var progressFooter: some View {
+        VStack(spacing: 12) {
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Palette.track)
+                    Capsule().fill(model.isOffWork ? model.theme.accentColor : Palette.digit)
+                        .frame(width: max(4, geo.size.width * model.progress))
+                }
+            }
+            .frame(height: 4)
+            .accessibilityElement()
+            .accessibilityLabel("今日进度")
+            .accessibilityValue("\(Int(model.progress * 100))%")
+
+            HStack {
+                Text("\(model.startTimeText) 到 · \(model.endTimeText) 下班")
+                Spacer()
+                Text("\(Int(model.progress * 100))%")
+            }
+            .font(.system(size: 12, weight: .medium))
+            .monospacedDigit()
+            .foregroundStyle(Palette.faint)
+        }
+    }
+}
+
+/// 左上角红黄绿按钮（仿 macOS 窗口按钮）：悬停时显示 × 和 − 符号
+/// 小窗尺寸固定，绿色按钮和系统一样显示为禁用的灰色
+struct WindowControls: View {
+    let close: () -> Void
+    let minimize: (() -> Void)?
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            TrafficLight(color: Color(red: 1.0, green: 0.373, blue: 0.341),
+                         symbol: "xmark", showsSymbol: hovering, action: close)
+                .accessibilityLabel("关闭")
+            TrafficLight(color: Color(red: 0.996, green: 0.737, blue: 0.180),
+                         symbol: "minus", showsSymbol: hovering, action: minimize ?? {})
+                .accessibilityLabel("最小化")
+            Circle()
+                .fill(Color.white.opacity(0.2))
+                .frame(width: 12, height: 12)
+                .accessibilityHidden(true)
+        }
+        .onHover { hovering = $0 }
+    }
+}
+
+struct TrafficLight: View {
+    let color: Color
+    let symbol: String
+    let showsSymbol: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                Circle().fill(color)
+                Circle().strokeBorder(Color.black.opacity(0.18), lineWidth: 0.5)
+                if showsSymbol {
+                    Image(systemName: symbol)
+                        .font(.system(size: 7, weight: .heavy))
+                        .foregroundStyle(Color.black.opacity(0.55))
+                }
+            }
+            .frame(width: 12, height: 12)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// 右上角设置按钮：悬停时图标变亮 + 浅色圆角底 + 手形光标
+struct SettingsGearButton: View {
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "gearshape")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(hovering ? Palette.digit : Palette.label)
+                .frame(width: 28, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(hovering ? Palette.hover : Color.clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { inside in
+            hovering = inside
+            if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
+        .animation(.easeOut(duration: 0.15), value: hovering)
+        .help("设置工作时长、今天几点到")
+        .accessibilityLabel("设置")
+    }
+}
+
+/// 数字牌一面：可选半透明牌面 + 按数字实际高度居中绘制的数字
+/// DIN Condensed 的上下留白不对称，用 Core Text 按大写高度（数字高度）定位基线，保证视觉居中
+struct DigitFace: View {
+    let value: String
+    let color: Color
+    var showsTile = true
+    var showsDigits = true
+
+    var body: some View {
+        Canvas { ctx, size in
+            if showsTile {
+                ctx.fill(Path(roundedRect: CGRect(origin: .zero, size: size),
+                              cornerRadius: Metrics.tileRadius, style: .continuous),
+                         with: .color(Palette.tile))
+            }
+            guard showsDigits else { return }
+            ctx.withCGContext { cg in
+                let font = NSFont(name: "DINCondensed-Bold", size: Metrics.digitFontSize)
+                    ?? NSFont.monospacedDigitSystemFont(ofSize: Metrics.digitFontSize * 0.8, weight: .bold)
+                let text = NSAttributedString(string: value, attributes: [
+                    .font: font,
+                    .foregroundColor: NSColor(color),
+                ])
+                let line = CTLineCreateWithAttributedString(text)
+                let width = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+                // 当前坐标系 y 轴向下，翻转文字矩阵让字形正向绘制
+                cg.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
+                cg.textPosition = CGPoint(x: (size.width - width) / 2,
+                                          y: (size.height + font.capHeight) / 2)
+                CTLineDraw(line, cg)
+            }
+        }
+        .frame(width: Metrics.tileSize, height: Metrics.tileSize)
+    }
+}
+
+/// 翻页数字牌：数字变化时，旧数字上半片向下翻倒，新数字下半片随后落下
+///
+/// 牌面是半透明的，翻片会透出下面的数字，所以底层数字随翻片角度淡入/淡出：
+/// - 上半：底层新数字从透明淡入，翻片（旧数字）倒下
+/// - 下半：翻片（新数字）落下，底层旧数字淡出
+struct FlipTile: View {
+    let value: String
+    let color: Color
+    let label: String
+
+    @State private var current: String
+    @State private var previous: String
+    @State private var flipping = false
+    /// 上半翻片角度：0 → -90
+    @State private var topAngle: Double = 0
+    /// 下半翻片角度：90 → 0
+    @State private var bottomAngle: Double = 0
+
+    private static let topDuration = 0.18
+    private static let bottomDuration = 0.22
+
+    init(value: String, color: Color, label: String) {
+        self.value = value
+        self.color = color
+        self.label = label
+        _current = State(initialValue: value)
+        _previous = State(initialValue: value)
+    }
+
+    var body: some View {
+        VStack(spacing: Metrics.splitGap) {
+            ZStack {
+                half(top: true) { DigitFace(value: "", color: color, showsDigits: false) }
+                half(top: true) { DigitFace(value: current, color: color, showsTile: false) }
+                    .opacity(flipping ? -topAngle / 90 : 1)
+                half(top: true) { DigitFace(value: previous, color: color) }
+                    .brightness(topAngle / 90 * 0.25)
+                    .rotation3DEffect(.degrees(topAngle), axis: (x: 1, y: 0, z: 0),
+                                      anchor: .bottom, perspective: 0.5)
+                    .opacity(flipping ? 1 : 0)
+            }
+            .zIndex(1)
+            ZStack {
+                half(top: false) { DigitFace(value: "", color: color, showsDigits: false) }
+                half(top: false) { DigitFace(value: previous, color: color, showsTile: false) }
+                    .opacity(flipping ? bottomAngle / 90 : 1)
+                half(top: false) { DigitFace(value: current, color: color) }
+                    .brightness(-bottomAngle / 90 * 0.25)
+                    .rotation3DEffect(.degrees(bottomAngle), axis: (x: 1, y: 0, z: 0),
+                                      anchor: .top, perspective: 0.5)
+                    .opacity(flipping ? 1 : 0)
+            }
+        }
+        .onChange(of: value) { newValue in flip(to: newValue) }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(value) \(label)")
+    }
+
+    /// 截取数字牌的上半或下半，中间留出缝隙
+    private func half<V: View>(top: Bool, @ViewBuilder _ content: () -> V) -> some View {
+        content()
+            .frame(width: Metrics.tileSize,
+                   height: Metrics.tileSize / 2 - Metrics.splitGap / 2,
+                   alignment: top ? .top : .bottom)
+            .clipped()
+    }
+
+    private func flip(to newValue: String) {
+        guard newValue != current else { return }
+        var instant = Transaction()
+        instant.disablesAnimations = true
+
+        // 准备：旧数字翻片立在上半，新数字翻片竖起藏在下半
+        withTransaction(instant) {
+            previous = current
+            current = newValue
+            topAngle = 0
+            bottomAngle = 90
+            flipping = true
+        }
+
+        // 第一段：旧数字上半片翻倒
+        withAnimation(.easeIn(duration: Self.topDuration)) { topAngle = -90 }
+
+        // 第二段：新数字下半片落下
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.topDuration) {
+            withAnimation(.easeOut(duration: Self.bottomDuration)) { bottomAngle = 0 }
+        }
+
+        // 结束：复位，静止状态上下都显示新数字
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.topDuration + Self.bottomDuration) {
+            guard current == newValue else { return }
+            withTransaction(instant) {
+                previous = current
+                topAngle = 0
+                flipping = false
+            }
+        }
+    }
+}
