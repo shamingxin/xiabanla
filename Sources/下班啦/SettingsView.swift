@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 
 /// 设置面板：参考 macOS 系统设置（菜单栏页）的分组样式
 /// - 组标题：13pt 半粗，与行内文字左对齐
@@ -7,6 +9,9 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var model: WorkTimerModel
     @ObservedObject var reminders: ReminderModel
+    /// 顶部 toast 文案，nil 时隐藏
+    @State private var toast: String?
+    @State private var toastToken = 0
 
     var body: some View {
         ScrollView {
@@ -17,6 +22,7 @@ struct SettingsView: View {
                 SettingsGroup("提醒") {
                     SettingsCard { waterRows }
                     SettingsCard { eggRows }
+                    SettingsCard { offWorkRows }
                 }
                 SettingsSection("通用") {
                     SettingsRow("登录时打开") {
@@ -24,13 +30,7 @@ struct SettingsView: View {
                     }
                     SettingsDivider()
                     SettingsRow("主题色") {
-                        HStack(spacing: 10) {
-                            ForEach(AppTheme.allCases) { theme in
-                                ThemeSwatch(theme: theme, selected: model.theme == theme) {
-                                    model.theme = theme
-                                }
-                            }
-                        }
+                        BackgroundPicker(model: model)
                     }
                 }
             }
@@ -39,50 +39,76 @@ struct SettingsView: View {
             .padding(.bottom, 24)
         }
         .frame(width: 460, height: 560)
-        .background(SettingsPalette.window)
+        .background(SettingsPalette.of(model.background).window)
+        .environment(\.settingsPalette, SettingsPalette.of(model.background))
+        .environment(\.colorScheme, model.background == .light ? .light : .dark)
+        .overlay(alignment: .top) {
+            if let toast {
+                ToastView(text: toast)
+                    .padding(.top, 10)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: toast)
     }
 
-    // MARK: - 今天
-
-    private var todaySection: some View {
-        SettingsSection("今日工作") {
-            SettingsRow("到岗时间") {
-                HStack(spacing: 8) {
-                    TimeField(date: startBinding,
-                              minDate: Calendar.current.startOfDay(for: Date()),
-                              maxDate: Date())
-                    if !model.hasStarted {
-                        Button("现在开始") { model.startWork() }
-                    }
-                }
-            }
-            if model.hasStarted {
-                SettingsDivider()
-                SettingsRow("预计下班") { ValueText(model.endTimeText) }
-            }
+    /// 显示 2.5 秒 toast，并让读屏读出来
+    private func showToast(_ text: String) {
+        toastToken += 1
+        let token = toastToken
+        toast = text
+        NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
+                             userInfo: [.announcement: text, .priority: NSAccessibilityPriorityLevel.high.rawValue])
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            if toastToken == token { toast = nil }
         }
     }
 
-    // MARK: - 工作
+    private static let rangeResetToast = "下班区间不能早于开始，已恢复默认 10:00 – 12:00"
 
-    /// 每日工作时长、参考上班时间变化时，参考下班时间由模型自动重算
+    // MARK: - 今日工作
+
+    /// 改得最频繁的一块，用设备面板样式（见 TodayPanel.swift）和下面的列表区分开
+    private var todaySection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsHeader("今日工作")
+            TodayPanel(model: model, arrivalGuess: { defaultArrivalGuess })
+        }
+    }
+
+    /// 点「补填」时先填一个规则里的上班时间（不晚于现在），再用上下箭头微调
+    private var defaultArrivalGuess: Date {
+        let base = WorkTimerModel.workdayBase(for: Date())
+        return min(WorkTimerModel.time(model.ruleStartText, on: base), Date())
+    }
+
+    // MARK: - 上班规则
+
+    /// 工时模式、工作时长、上班时间变化时，下班时间由模型自动重算
     private var workSection: some View {
-        SettingsSection("工作时长") {
-            SettingsRow("每日工作时长") {
-                Picker("", selection: $model.workHours) {
-                    ForEach(Array(stride(from: 6.0, through: 12.0, by: 0.5)), id: \.self) { h in
-                        Text(Self.hoursText(h)).tag(h)
+        SettingsSection("上班规则") {
+            SettingsRow("工时模式") {
+                SettingsPicker("工时模式", selection: $model.workMode, options: WorkMode.allCases) { $0.title }
+            }
+            SettingsDivider()
+            SettingsRow("工作时长") {
+                SettingsPicker("工作时长", selection: $model.workHours,
+                               options: Array(stride(from: 6.0, through: 12.0, by: 0.5))) { Self.hoursText($0) }
+            }
+            SettingsDivider()
+            SettingsRow("上班时间") {
+                if model.workMode == .fixed {
+                    TimeField(date: ruleStartBinding, accessibilityLabel: "上班时间")
+                } else {
+                    HStack(spacing: 6) {
+                        TimeField(date: ruleStartBinding, accessibilityLabel: "上班区间开始")
+                        Text("–").foregroundStyle(.secondary).accessibilityHidden(true)
+                        TimeField(date: ruleLatestBinding, accessibilityLabel: "上班区间结束")
                     }
                 }
-                .labelsHidden()
-                .fixedSize()
             }
             SettingsDivider()
-            SettingsRow("参考上班时间") {
-                TimeField(date: referenceStartBinding)
-            }
-            SettingsDivider()
-            SettingsRow("参考下班时间") { ValueText(model.defaultEndTimeText) }
+            SettingsRow("下班时间") { ValueText(model.ruleEndText) }
         }
     }
 
@@ -94,14 +120,9 @@ struct SettingsView: View {
             if reminders.waterEnabled {
                 SettingsDivider()
                 SettingsRow("提醒间隔") {
-                    Picker("", selection: $reminders.waterIntervalMinutes) {
-                        ForEach(ReminderModel.waterIntervals, id: \.self) { Text(Self.minutesText($0)).tag($0) }
-                    }
-                    .labelsHidden()
-                    .fixedSize()
+                    SettingsPicker("提醒间隔", selection: $reminders.waterIntervalMinutes,
+                                   options: ReminderModel.waterIntervals) { Self.minutesText($0) }
                 }
-                SettingsDivider()
-                SettingsRow("仅在上班时提醒") { SettingsSwitch(isOn: $reminders.waterOnlyDuringWork) }
                 SettingsDivider()
                 videoRow(.water)
             }
@@ -114,51 +135,20 @@ struct SettingsView: View {
             SettingsRow("小彩蛋") { SettingsSwitch(isOn: $reminders.eggEnabled) }
             if reminders.eggEnabled {
                 SettingsDivider()
-                SettingsRow("出现时机") {
-                    Picker("", selection: $reminders.eggMode) {
-                        ForEach(EggMode.allCases) { Text($0.title).tag($0) }
-                    }
-                    .labelsHidden()
-                    .fixedSize()
-                }
-                SettingsDivider()
-                switch reminders.eggMode {
-                case .interval:
-                    SettingsRow("间隔") {
-                        Picker("", selection: $reminders.eggIntervalMinutes) {
-                            ForEach(ReminderModel.eggIntervals, id: \.self) { Text(Self.minutesText($0)).tag($0) }
-                        }
-                        .labelsHidden()
-                        .fixedSize()
-                    }
-                    SettingsDivider()
-                    SettingsRow("仅在上班时出现") { SettingsSwitch(isOn: $reminders.eggOnlyDuringWork) }
-                case .random:
-                    SettingsRow("每天次数") {
-                        Picker("", selection: $reminders.eggRandomCount) {
-                            ForEach(ReminderModel.eggCounts, id: \.self) { Text("\($0) 次").tag($0) }
-                        }
-                        .labelsHidden()
-                        .fixedSize()
-                    }
-                case .fixedTime:
-                    SettingsRow("时间") { TimeField(date: eggTimeBinding) }
-                    SettingsDivider()
-                    SettingsRow("仅在上班时出现") { SettingsSwitch(isOn: $reminders.eggOnlyDuringWork) }
-                case .beforeOffWork:
-                    SettingsRow("提前") {
-                        Picker("", selection: $reminders.eggLeadMinutes) {
-                            ForEach(ReminderModel.eggLeadOptions, id: \.self) {
-                                Text($0 == 0 ? "下班那一刻" : "下班前 \($0) 分钟").tag($0)
-                            }
-                        }
-                        .labelsHidden()
-                        .fixedSize()
-                    }
+                SettingsRow("提醒间隔") {
+                    SettingsPicker("提醒间隔", selection: $reminders.eggIntervalMinutes,
+                                   options: ReminderModel.eggIntervals) { Self.minutesText($0) }
                 }
                 SettingsDivider()
                 videoRow(.egg)
             }
+    }
+
+    // MARK: - 下班提醒
+
+    @ViewBuilder
+    private var offWorkRows: some View {
+        SettingsRow("下班提醒") { SettingsSwitch(isOn: $reminders.offWorkEnabled) }
     }
 
     /// 视频行：显示内置视频数量，可立即预览
@@ -174,15 +164,6 @@ struct SettingsView: View {
         }
     }
 
-    private var eggTimeBinding: Binding<Date> {
-        Binding(
-            get: { ReminderModel.time(reminders.eggFixedTimeText, on: Date()) ?? Date() },
-            set: { date in
-                let c = Calendar.current.dateComponents([.hour, .minute], from: date)
-                reminders.eggFixedTimeText = String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0)
-            }
-        )
-    }
 
     private static func minutesText(_ m: Int) -> String {
         m >= 60 && m % 60 == 0 ? "每 \(m / 60) 小时" : (m > 60 ? "每 \(m / 60) 小时 \(m % 60) 分" : "每 \(m) 分钟")
@@ -190,23 +171,28 @@ struct SettingsView: View {
 
     // MARK: - 绑定
 
-    private var startBinding: Binding<Date> {
-        Binding(get: { model.todayStartTime ?? Date() },
-                set: { model.setStartTime($0) })
+    private var ruleStartBinding: Binding<Date> {
+        timeBinding(get: { model.ruleStartText }, set: { text in
+            if !model.setStartText(text) { showToast(Self.rangeResetToast) }
+        })
+    }
+
+    private var ruleLatestBinding: Binding<Date> {
+        timeBinding(get: { model.latestTextForUI }, set: { text in
+            if !model.setLatestText(text) { showToast(Self.rangeResetToast) }
+        })
     }
 
     /// 把 "HH:mm" 字符串绑定成 Date，供时间选择器使用
-    private var referenceStartBinding: Binding<Date> {
+    private func timeBinding(get: @escaping () -> String, set: @escaping (String) -> Void) -> Binding<Date> {
         Binding(
             get: {
-                let parts = model.defaultStartTimeText.split(separator: ":").compactMap { Int($0) }
-                return Calendar.current.date(bySettingHour: parts.first ?? 0,
-                                             minute: parts.count > 1 ? parts[1] : 0,
-                                             second: 0, of: Date()) ?? Date()
+                let m = WorkTimerModel.minutes(get())
+                return Calendar.current.date(bySettingHour: m / 60, minute: m % 60, second: 0, of: Date()) ?? Date()
             },
             set: { date in
                 let c = Calendar.current.dateComponents([.hour, .minute], from: date)
-                model.defaultStartTimeText = String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0)
+                set(String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0))
             }
         )
     }
@@ -284,6 +270,7 @@ struct SettingsHeader: View {
 /// 圆角卡片容器
 struct SettingsCard<Content: View>: View {
     @ViewBuilder let content: Content
+    @Environment(\.settingsPalette) private var palette
 
     init(@ViewBuilder content: () -> Content) {
         self.content = content()
@@ -293,29 +280,226 @@ struct SettingsCard<Content: View>: View {
         VStack(spacing: 0) { content }
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(SettingsPalette.card)
+                    .fill(palette.card)
             )
     }
 }
 
 /// 一行：左侧标签，右侧控件
+/// 可选副标题：标签下方一行次级色说明，参考系统设置「接入电源时启动」
 struct SettingsRow<Trailing: View>: View {
     let label: String
+    let subtitle: String?
     @ViewBuilder let trailing: Trailing
 
-    init(_ label: String, @ViewBuilder trailing: () -> Trailing) {
+    init(_ label: String, subtitle: String? = nil, @ViewBuilder trailing: () -> Trailing) {
         self.label = label
+        self.subtitle = subtitle
         self.trailing = trailing()
     }
 
     var body: some View {
         HStack(spacing: 12) {
-            Text(label).font(.system(size: 13))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(label).font(.system(size: 13))
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
             Spacer(minLength: 8)
             trailing
         }
         .padding(.horizontal, SettingsMetrics.inset)
+        .padding(.vertical, subtitle == nil ? 0 : 8)
         .frame(minHeight: 40)
+    }
+}
+
+/// 系统设置风格的下拉（参考「能耗 › 接入电源时启动」）
+/// - 默认：文字 + 右侧小圆底上下箭头
+/// - 悬停：整块浅色圆角底，圆底隐去
+/// - 按下：底色再亮一档，弹出系统原生菜单（选中项打勾，菜单对齐当前项）
+struct SettingsPicker<Value: Hashable>: View {
+    @Environment(\.settingsPalette) private var palette
+    let label: String
+    @Binding var selection: Value
+    let options: [Value]
+    let title: (Value) -> String
+
+    @State private var hovering = false
+    @State private var pressed = false
+
+    init(_ label: String, selection: Binding<Value>, options: [Value], title: @escaping (Value) -> String) {
+        self.label = label
+        self._selection = selection
+        self.options = options
+        self.title = title
+    }
+
+    private var active: Bool { hovering || pressed }
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Text(title(selection))
+                .font(.system(size: 13))
+                .monospacedDigit()
+            UpDownChevron()
+                .stroke(Color.primary.opacity(0.85),
+                        style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round))
+                .frame(width: 12, height: 12)
+                .frame(width: 22, height: 22)
+                .background(Circle().fill(active ? Color.clear : palette.chevronBase))
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 3)
+        .frame(height: 28)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(Color.primary.opacity(pressed ? 0.12 : (hovering ? 0.07 : 0)))
+        )
+        .animation(.easeOut(duration: 0.12), value: hovering)
+        .animation(.easeOut(duration: 0.08), value: pressed)
+        .accessibilityHidden(true)
+        // 点击交给透明的系统弹出按钮处理：菜单位置、键盘、读屏都是原生的
+        .overlay(
+            PopUpOverlay(titles: options.map(title),
+                         selectedIndex: options.firstIndex(of: selection) ?? 0,
+                         label: label,
+                         onSelect: { index in
+                             if options.indices.contains(index) { selection = options[index] }
+                         },
+                         onHover: { hovering = $0 },
+                         onPress: { pressed = $0 })
+        )
+    }
+}
+
+/// 系统设置下拉用的箭头：设计稿 Assets/Icons/updown-chevron.svg（12×12 画板，线宽 1.2）
+/// 按 12×12 坐标描点，再缩放到实际尺寸，保证和设计稿一致
+private struct UpDownChevron: Shape {
+    func path(in r: CGRect) -> Path {
+        let sx = r.width / 12, sy = r.height / 12
+        func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: r.minX + x * sx, y: r.minY + y * sy) }
+        var p = Path()
+        // 下箭头 ∨
+        p.move(to: pt(9.95262, 7.31759))
+        p.addLine(to: pt(8.63503, 8.63518))
+        p.addLine(to: pt(6.6323, 10.6379))
+        p.addCurve(to: pt(5.36741, 10.6379), control1: pt(6.28301, 10.9872), control2: pt(5.7167, 10.9872))
+        p.addLine(to: pt(3.36467, 8.63518))
+        p.addLine(to: pt(2.04708, 7.31759))
+        // 上箭头 ∧
+        p.move(to: pt(9.95262, 4.68241))
+        p.addLine(to: pt(8.63503, 3.36482))
+        p.addLine(to: pt(6.6323, 1.36208))
+        p.addCurve(to: pt(5.36741, 1.36208), control1: pt(6.28301, 1.01279), control2: pt(5.7167, 1.01279))
+        p.addLine(to: pt(3.36467, 3.36482))
+        p.addLine(to: pt(2.04708, 4.68241))
+        return p
+    }
+}
+
+/// 透明的 NSPopUpButton，只负责响应点击、弹菜单，外观由 SwiftUI 绘制
+private struct PopUpOverlay: NSViewRepresentable {
+    let titles: [String]
+    let selectedIndex: Int
+    let label: String
+    let onSelect: (Int) -> Void
+    let onHover: (Bool) -> Void
+    let onPress: (Bool) -> Void
+
+    func makeNSView(context: Context) -> HoverPopUpButton {
+        let button = HoverPopUpButton(frame: .zero, pullsDown: false)
+        button.isTransparent = true
+        button.isBordered = false
+        // 不画系统自带的上下箭头，箭头由 SwiftUI 按设计稿绘制，避免重影
+        (button.cell as? NSPopUpButtonCell)?.arrowPosition = .noArrow
+        button.font = .systemFont(ofSize: 13)
+        button.target = context.coordinator
+        button.action = #selector(Coordinator.changed(_:))
+        return button
+    }
+
+    func updateNSView(_ button: HoverPopUpButton, context: Context) {
+        context.coordinator.parent = self
+        if button.itemTitles != titles {
+            button.removeAllItems()
+            button.addItems(withTitles: titles)
+        }
+        if button.indexOfSelectedItem != selectedIndex { button.selectItem(at: selectedIndex) }
+        button.setAccessibilityLabel(label)
+        button.onHover = { onHover($0) }
+        button.onPress = { onPress($0) }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject {
+        var parent: PopUpOverlay
+        init(_ parent: PopUpOverlay) { self.parent = parent }
+        @objc func changed(_ sender: NSPopUpButton) { parent.onSelect(sender.indexOfSelectedItem) }
+    }
+}
+
+/// 带悬停 / 按下回调的弹出按钮
+final class HoverPopUpButton: NSPopUpButton {
+    var onHover: ((Bool) -> Void)?
+    var onPress: ((Bool) -> Void)?
+    private var trackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea { removeTrackingArea(trackingArea) }
+        let area = NSTrackingArea(rect: .zero,
+                                  options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                  owner: self)
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        onHover?(true)
+        NSCursor.pointingHand.set()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        onHover?(false)
+        NSCursor.arrow.set()
+    }
+
+    /// 菜单弹出期间 super.mouseDown 会阻塞，返回即表示菜单已关闭
+    override func mouseDown(with event: NSEvent) {
+        onPress?(true)
+        super.mouseDown(with: event)
+        onPress?(false)
+        if let window {
+            let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+            onHover?(bounds.contains(point))
+        }
+    }
+}
+
+/// 顶部轻提示
+struct ToastView: View {
+    @Environment(\.settingsPalette) private var palette
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .foregroundStyle(Color(red: 1.0, green: 0.74, blue: 0.18))
+            Text(text)
+        }
+        .font(.system(size: 12, weight: .medium))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Capsule().fill(palette.toast))
+        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.25), radius: 8, y: 2)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -326,8 +510,38 @@ struct SettingsSwitch: View {
     var body: some View {
         Toggle("", isOn: $isOn)
             .labelsHidden()
-            .toggleStyle(.switch)
-            .controlSize(.small)
+            .toggleStyle(AccentSwitchStyle())
+    }
+}
+
+/// 自绘开关：开启时用「今日工作」面板的橙色强调色
+/// 系统开关跟随系统强调色，窗口失焦还会变灰，所以自己画，保证颜色稳定
+struct AccentSwitchStyle: ToggleStyle {
+    @Environment(\.settingsPalette) private var palette
+    @Environment(\.colorScheme) private var scheme
+
+    func makeBody(configuration: Configuration) -> some View {
+        let on = configuration.isOn
+        let offTrack = scheme == .light ? Color.black.opacity(0.12) : Color.white.opacity(0.16)
+        return Button { configuration.isOn.toggle() } label: {
+            ZStack(alignment: on ? .trailing : .leading) {
+                Capsule()
+                    .fill(on ? TodayPalette.dark.accent : offTrack)
+                    .overlay(Capsule().strokeBorder(Color.black.opacity(0.08), lineWidth: 0.5))
+                Circle()
+                    .fill(Color.white)
+                    .shadow(color: .black.opacity(0.25), radius: 1, y: 0.5)
+                    .padding(2)
+            }
+            .frame(width: 32, height: 18)
+            .animation(.easeOut(duration: 0.15), value: on)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement()
+        .accessibilityAddTraits(.isButton)
+        .accessibilityValue(on ? "开" : "关")
+        .accessibilityAction { configuration.isOn.toggle() }
     }
 }
 
@@ -346,19 +560,57 @@ struct ValueText: View {
 
 /// 行间分隔线：左右与文字对齐内缩
 struct SettingsDivider: View {
+    @Environment(\.settingsPalette) private var palette
     var body: some View {
         Rectangle()
-            .fill(SettingsPalette.separator)
+            .fill(palette.separator)
             .frame(height: 0.5)
             .padding(.horizontal, SettingsMetrics.inset)
     }
 }
 
-/// 配色取自 macOS 系统设置深色模式（窗口 #2A2928 / 卡片 #353332），整体再压深一档
-enum SettingsPalette {
-    static let window = Color(red: 0x22 / 255, green: 0x21 / 255, blue: 0x20 / 255)     // #222120
-    static let card = Color(red: 0x2D / 255, green: 0x2B / 255, blue: 0x2A / 255)       // #2D2B2A
-    static let separator = Color.white.opacity(0.07)
+/// 设置面板配色：跟随「背景」选项
+/// - 深色取自系统设置深色模式整体压深一档（窗口 #222120 / 卡片 #2D2B2A）
+/// - 浅色取自系统设置浅色模式（窗口 #FFFFFF / 卡片 #F7F7F7 / 分隔线 #EBEBEB）
+struct SettingsPalette {
+    var window: Color
+    var card: Color
+    var separator: Color
+    /// 下拉箭头的小圆底
+    var chevronBase: Color
+    var toast: Color
+    var nsWindow: NSColor
+
+    static let dark = SettingsPalette(
+        window: Color(red: 0x22 / 255, green: 0x21 / 255, blue: 0x20 / 255),
+        card: Color(red: 0x2D / 255, green: 0x2B / 255, blue: 0x2A / 255),
+        separator: Color.white.opacity(0.07),
+        chevronBase: Color.white.opacity(0.1),
+        toast: Color(white: 0.24),
+        nsWindow: NSColor(srgbRed: 0x22 / 255, green: 0x21 / 255, blue: 0x20 / 255, alpha: 1))
+
+    static let light = SettingsPalette(
+        window: .white,
+        card: Color(red: 0xF7 / 255, green: 0xF7 / 255, blue: 0xF7 / 255),
+        separator: Color(red: 0xEB / 255, green: 0xEB / 255, blue: 0xEB / 255),
+        chevronBase: Color(red: 0xE4 / 255, green: 0xE4 / 255, blue: 0xE4 / 255),
+        toast: .white,
+        nsWindow: .white)
+
+    static func of(_ background: AppBackground) -> SettingsPalette {
+        background == .light ? .light : .dark
+    }
+}
+
+private struct SettingsPaletteKey: EnvironmentKey {
+    static let defaultValue = SettingsPalette.dark
+}
+
+extension EnvironmentValues {
+    var settingsPalette: SettingsPalette {
+        get { self[SettingsPaletteKey.self] }
+        set { self[SettingsPaletteKey.self] = newValue }
+    }
 }
 
 /// 无边框时间选择器：只显示数字和右侧上下箭头，数字底下没有输入框
@@ -367,6 +619,7 @@ struct TimeField: NSViewRepresentable {
     @Binding var date: Date
     var minDate: Date? = nil
     var maxDate: Date? = nil
+    var accessibilityLabel: String = "时间"
 
     func makeNSView(context: Context) -> NSDatePicker {
         let picker = NSDatePicker()
@@ -380,7 +633,7 @@ struct TimeField: NSViewRepresentable {
         picker.target = context.coordinator
         picker.action = #selector(Coordinator.changed(_:))
         picker.setContentHuggingPriority(.required, for: .horizontal)
-        picker.setAccessibilityLabel("时间")
+        picker.setAccessibilityLabel(accessibilityLabel)
         return picker
     }
 
@@ -405,30 +658,70 @@ enum SettingsMetrics {
     static let inset: CGFloat = 12
 }
 
-/// 主题色色块：仿 macOS「强调色」选择器，选中时外圈描边
-struct ThemeSwatch: View {
-    let theme: AppTheme
-    let selected: Bool
-    let action: () -> Void
+/// 背景选择：黑色 / 白色色块 + 上传图片按钮
+struct BackgroundPicker: View {
+    @ObservedObject var model: WorkTimerModel
 
     var body: some View {
-        Button(action: action) {
+        HStack(spacing: 10) {
+            swatch(.dark, fill: .black)
+            swatch(.light, fill: .white)
+            Button("上传图片…", action: pickImage)
+                .controlSize(.small)
+        }
+    }
+
+    private func swatch(_ option: AppBackground, fill: Color) -> some View {
+        let selected = model.background == option
+        return Button(action: { model.background = option }) {
             Circle()
-                .fill(theme.accentColor)
+                .fill(fill)
                 .frame(width: 18, height: 18)
-                .overlay(Circle().strokeBorder(Color.black.opacity(0.15), lineWidth: 0.5))
+                .overlay(Circle().strokeBorder(Color.primary.opacity(0.25), lineWidth: 0.5))
                 .overlay {
                     if selected {
-                        Circle().fill(.white).frame(width: 6, height: 6)
+                        Circle().fill(fill == .white ? Color.black : Color.white).frame(width: 6, height: 6)
                     }
                 }
                 .padding(3)
-                .overlay(Circle().strokeBorder(selected ? theme.accentColor.opacity(0.6) : .clear, lineWidth: 2))
+                // 选中圈和开关同色：今日工作面板的橙色强调色
+                .overlay(Circle().strokeBorder(selected ? TodayPalette.dark.accent : .clear, lineWidth: 2))
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .help(theme.rawValue)
-        .accessibilityLabel(theme.rawValue)
+        .help(option.rawValue)
+        .accessibilityLabel(option.rawValue)
         .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    /// 打开系统文件选择器，选中的图片拷贝到 App 的 Application Support 目录持久保存
+    private func pickImage() {
+        let panel = NSOpenPanel()
+        panel.title = "选择背景图片"
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        if let saved = Self.persist(url) {
+            model.backgroundImagePath = saved
+            model.background = .image
+        }
+    }
+
+    /// 拷贝到 Application Support/下班啦/Backgrounds，避免原图被用户移动或删除后失效
+    private static func persist(_ source: URL) -> String? {
+        let fm = FileManager.default
+        guard let support = try? fm.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                                        appropriateFor: nil, create: true) else { return nil }
+        let dir = support.appendingPathComponent("下班啦/Backgrounds", isDirectory: true)
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dest = dir.appendingPathComponent("custom.\(source.pathExtension.isEmpty ? "png" : source.pathExtension)")
+        try? fm.removeItem(at: dest)
+        do {
+            try fm.copyItem(at: source, to: dest)
+            return dest.path
+        } catch {
+            return nil
+        }
     }
 }

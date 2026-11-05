@@ -77,7 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func makeController(forDesktop: Bool) -> NSHostingController<WidgetContainer<CountdownCardView>> {
         let model = self.model
         let actions = self.actions(forDesktop: forDesktop)
-        let controller = NSHostingController(rootView: WidgetContainer {
+        let controller = NSHostingController(rootView: WidgetContainer(model: model) {
             CountdownCardView(model: model, actions: actions)
         })
         controller.sizingOptions = [.preferredContentSize]
@@ -141,11 +141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateStatusItem() {
-        let text: String
-        if !model.hasStarted { text = "未开始" }
-        else if model.isOffWork { text = "已下班" }
-        else { text = "下班倒计时：" + model.compactRemainingText }
-        statusItem.button?.title = " " + text
+        statusItem.button?.title = " " + model.statusText
     }
 
     @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
@@ -223,13 +219,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.title = "下班啦设置"
             // 标题栏与面板背景同色（#222120），避免标题栏和内容区出现色差
             window.titlebarAppearsTransparent = true
-            window.backgroundColor = NSColor(srgbRed: 0x22 / 255, green: 0x21 / 255, blue: 0x20 / 255, alpha: 1)
             window.isReleasedWhenClosed = false
+            applySettingsAppearance(window)
+            // 切换背景时，标题栏和系统控件（开关、菜单）跟着变深/浅
+            model.$background
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self, weak window] _ in
+                    guard let window else { return }
+                    DispatchQueue.main.async { self?.applySettingsAppearance(window) }
+                }
+                .store(in: &cancellables)
             window.center()
             settingsWindow = window
         }
         NSApp.activate(ignoringOtherApps: true)
         settingsWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    /// 标题栏与面板背景同色，避免标题栏和内容区出现色差
+    private func applySettingsAppearance(_ window: NSWindow) {
+        let palette = SettingsPalette.of(model.background)
+        window.appearance = NSAppearance(named: model.background == .light ? .aqua : .darkAqua)
+        window.backgroundColor = palette.nsWindow
     }
 
     // MARK: - 主菜单（⌘, 设置、⌘W 关闭、编辑快捷键）

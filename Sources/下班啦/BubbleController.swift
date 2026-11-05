@@ -5,19 +5,19 @@ import SwiftUI
 /// 思考泡尺寸：菜单栏图标下方依次吐出 3 个小圈，最后是放动画的云朵大圈
 enum BubbleMetrics {
     /// 正方形：和 640×640 的视频比例一致，不会左右被裁
-    static let cloudWidth: CGFloat = 150
-    static let cloudHeight: CGFloat = 150
+    static let cloudWidth: CGFloat = 195
+    static let cloudHeight: CGFloat = 195
     /// 左右留白：放关闭按钮和阴影
     static let sideMargin: CGFloat = 14
     static let bottomMargin: CGFloat = 10
     /// 菜单栏图标到大圈顶部的距离，小圈排在这一段里
     static let trailHeight: CGFloat = 30
     static let lineWidth: CGFloat = 2
-    static let closeSize: CGFloat = 20
+    static let closeSize: CGFloat = 26
     /// 播完后停留多久再消失
     static let lingerAfterEnd: TimeInterval = 1
     /// 小圈：直径 + 在轨迹上的位置（0 = 图标处，1 = 大圈顶部），越靠近大圈越大
-    static let dots: [(diameter: CGFloat, t: CGFloat)] = [(9, 0.5)]
+    static let dots: [(diameter: CGFloat, t: CGFloat)] = [(12, 0.5)]
 
     static var panelSize: CGSize {
         CGSize(width: cloudWidth + sideMargin * 2, height: trailHeight + cloudHeight + bottomMargin)

@@ -1,27 +1,45 @@
 import SwiftUI
 import AppKit
 
-extension AppTheme {
-    var accentColor: Color {
-        switch self {
-        case .green: return Color(red: 0.30, green: 0.78, blue: 0.40)
-        case .blue: return Color(red: 0.25, green: 0.55, blue: 0.95)
-        case .orange: return Color(red: 0.95, green: 0.60, blue: 0.20)
-        case .purple: return Color(red: 0.60, green: 0.40, blue: 0.90)
-        }
-    }
+
+
+/// 卡片配色：黑色背景和图片背景用浅色字，白色背景用深色字
+/// 「公司倒欠你」固定用同一个绿色，不随背景变化
+struct CardPalette {
+    var digit: Color
+    var label: Color
+    var faint: Color
+    /// 数字牌：半透明，透出背后的毛玻璃
+    var tile: Color
+    /// 进度条底轨
+    var track: Color
+    var hover: Color
+    let overtime = Color(red: 0.30, green: 0.78, blue: 0.40)
+
+    static let dark = CardPalette(digit: Color(white: 0.93),
+                                  label: Color.white.opacity(0.75),
+                                  faint: Color.white.opacity(0.66),
+                                  tile: Color.black.opacity(0.32),
+                                  track: Color.black.opacity(0.32),
+                                  hover: Color.white.opacity(0.14))
+
+    static let light = CardPalette(digit: Color(white: 0.12),
+                                   label: Color.black.opacity(0.70),
+                                   faint: Color.black.opacity(0.55),
+                                   tile: Color.black.opacity(0.06),
+                                   track: Color.black.opacity(0.10),
+                                   hover: Color.black.opacity(0.08))
 }
 
-/// 配色：全部用半透明色，叠在毛玻璃上，浅色/深色桌面下都能看清
-enum Palette {
-    static let digit = Color(white: 0.93)
-    static let label = Color.white.opacity(0.75)
-    static let faint = Color.white.opacity(0.66)
-    /// 数字牌：半透明黑，透出背后的毛玻璃
-    static let tile = Color.black.opacity(0.32)
-    /// 进度条底轨：半透明黑
-    static let track = Color.black.opacity(0.32)
-    static let hover = Color.white.opacity(0.14)
+private struct CardPaletteKey: EnvironmentKey {
+    static let defaultValue = CardPalette.dark
+}
+
+extension EnvironmentValues {
+    var cardPalette: CardPalette {
+        get { self[CardPaletteKey.self] }
+        set { self[CardPaletteKey.self] = newValue }
+    }
 }
 
 /// 布局尺寸
@@ -49,19 +67,20 @@ struct CardActions {
 /// 倒计时主视图
 /// - 未开始：数字牌显示 --，下方「开始上班」按钮 + 补填到岗时间入口
 /// - 倒计时中：时/分/秒三块翻页数字牌 + 进度条 + 到岗/下班时间
-/// - 已下班：主题色数字 + 「已下班 · 今天辛苦了。」
+/// - 已下班：红色正向计时「已下班，公司倒欠你」+ 超过 100% 的冲击进度条
 struct CountdownCardView: View {
     @ObservedObject var model: WorkTimerModel
+    @Environment(\.cardPalette) var palette
     var actions = CardActions()
 
     private var digitColor: Color {
-        model.isOffWork ? model.theme.accentColor : Palette.digit
+        model.isOffWork ? palette.overtime : palette.digit
     }
 
     /// 时、分、秒三段文字
     private var parts: (String, String, String) {
         if !model.hasStarted { return ("--", "--", "--") }
-        let s = model.remainingSeconds
+        let s = model.isOffWork ? model.overtimeSeconds : model.remainingSeconds
         return (String(format: "%02d", s / 3600),
                 String(format: "%02d", (s % 3600) / 60),
                 String(format: "%02d", s % 60))
@@ -90,7 +109,6 @@ struct CountdownCardView: View {
         .padding(.top, actions.closeWindow != nil ? 16 : Metrics.verticalPadding)
         .padding(.bottom, Metrics.verticalPadding)
         .fixedSize()
-        .environment(\.colorScheme, .dark)
         .animation(.easeInOut(duration: 0.3), value: model.isOffWork)
         .contextMenu {
             Button("设置…", action: actions.openSettings)
@@ -109,14 +127,14 @@ struct CountdownCardView: View {
         HStack(spacing: 8) {
             if model.isOffWork {
                 Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(model.theme.accentColor)
-                Text("已下班 · 今天辛苦了。")
-                    .foregroundStyle(model.theme.accentColor)
+                    .foregroundStyle(palette.overtime)
+                Text("已下班，公司倒欠你")
+                    .foregroundStyle(palette.overtime)
             } else {
                 Image(systemName: "clock")
-                    .foregroundStyle(Palette.label)
+                    .foregroundStyle(palette.label)
                 Text(model.hasStarted ? "距离下班" : "还没开始上班")
-                    .foregroundStyle(Palette.label)
+                    .foregroundStyle(palette.label)
             }
             Spacer()
             SettingsGearButton(action: actions.openSettings)
@@ -131,22 +149,22 @@ struct CountdownCardView: View {
             Button(action: { model.startWork() }) {
                 Text("开始上班")
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(Palette.digit)
+                    .foregroundStyle(palette.digit)
                     .frame(maxWidth: .infinity)
                     .frame(height: 38)
                     .overlay(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .strokeBorder(Palette.digit, lineWidth: 1.5)
+                            .strokeBorder(palette.digit, lineWidth: 1.5)
                     )
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
             HStack(spacing: 4) {
-                Text("忘了点？").foregroundStyle(Palette.faint)
+                Text("忘了点？").foregroundStyle(palette.faint)
                 Button("补填今天的到岗时间", action: actions.openSettings)
                     .buttonStyle(.plain)
-                    .foregroundStyle(Palette.label)
+                    .foregroundStyle(palette.label)
                     .underline()
             }
             .font(.system(size: 12, weight: .medium))
@@ -156,33 +174,80 @@ struct CountdownCardView: View {
     // MARK: - 底部：进度条 + 到岗/下班时间 + 百分比
 
     private var progressFooter: some View {
-        VStack(spacing: 12) {
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Palette.track)
-                    Capsule().fill(model.isOffWork ? model.theme.accentColor : Palette.digit)
-                        .frame(width: max(4, geo.size.width * model.progress))
+        let percent = Int(model.progress * 100)
+        let tint = model.isOffWork ? palette.overtime : palette.faint
+        return VStack(spacing: 12) {
+            Group {
+                if model.isOffWork {
+                    OvertimeBar()
+                } else {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(palette.track)
+                            Capsule().fill(palette.digit)
+                                .frame(width: max(4, geo.size.width * min(1, model.progress)))
+                        }
+                    }
                 }
             }
             .frame(height: 4)
             .accessibilityElement()
             .accessibilityLabel("今日进度")
-            .accessibilityValue("\(Int(model.progress * 100))%")
+            .accessibilityValue("\(percent)%")
 
             HStack {
-                Text("\(model.startTimeText) 到 · \(model.endTimeText) 下班")
+                Text(footerText).foregroundStyle(palette.faint)
                 Spacer()
-                Text("\(Int(model.progress * 100))%")
+                Text("\(percent)%").foregroundStyle(tint)
             }
             .font(.system(size: 12, weight: .medium))
             .monospacedDigit()
-            .foregroundStyle(Palette.faint)
+        }
+    }
+
+    /// 「09:44 到 · 19:00 下班」；固定模式没填到岗时显示「10:00 上班 · 19:00 下班」
+    private var footerText: String {
+        if model.hasArrived { return "\(model.startTimeText) 到 · \(model.endTimeText) 下班" }
+        return "\(model.ruleStartText) 上班 · \(model.endTimeText) 下班"
+    }
+}
+
+/// 下班后的红色进度条：满格红条上，亮光一波波从左往右冲过去，整体轻微呼吸
+/// 系统开启「减弱动态效果」时只显示静态红条
+struct OvertimeBar: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.cardPalette) var palette
+    private static let period = 1.1
+
+    var body: some View {
+        if reduceMotion {
+            Capsule().fill(palette.overtime)
+        } else {
+            TimelineView(.animation) { context in
+                let t = context.date.timeIntervalSinceReferenceDate
+                let phase = (t / Self.period).truncatingRemainder(dividingBy: 1)
+                let pulse = 0.82 + 0.18 * sin(t * 2 * .pi / Self.period)
+                GeometryReader { geo in
+                    let w = geo.size.width
+                    let glow = w * 0.28
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(palette.overtime.opacity(pulse))
+                        // 冲击光：一段渐亮的高光，从左侧外面冲到右侧外面
+                        LinearGradient(colors: [.clear, .white.opacity(0.85), .clear],
+                                       startPoint: .leading, endPoint: .trailing)
+                            .frame(width: glow)
+                            .offset(x: -glow + (w + glow) * phase)
+                    }
+                    .clipShape(Capsule())
+                    .shadow(color: palette.overtime.opacity(0.6 * pulse), radius: 4)
+                }
+            }
         }
     }
 }
 
 /// 左上角红黄绿按钮（仿 macOS 窗口按钮）：悬停时显示 × 和 − 符号
-/// 小窗尺寸固定，绿色按钮和系统一样显示为禁用的灰色
+/// 小窗尺寸固定，不需要全屏按钮，只保留关闭和最小化
 struct WindowControls: View {
     let close: () -> Void
     let minimize: (() -> Void)?
@@ -196,10 +261,6 @@ struct WindowControls: View {
             TrafficLight(color: Color(red: 0.996, green: 0.737, blue: 0.180),
                          symbol: "minus", showsSymbol: hovering, action: minimize ?? {})
                 .accessibilityLabel("最小化")
-            Circle()
-                .fill(Color.white.opacity(0.2))
-                .frame(width: 12, height: 12)
-                .accessibilityHidden(true)
         }
         .onHover { hovering = $0 }
     }
@@ -232,17 +293,18 @@ struct TrafficLight: View {
 /// 右上角设置按钮：悬停时图标变亮 + 浅色圆角底 + 手形光标
 struct SettingsGearButton: View {
     let action: () -> Void
+    @Environment(\.cardPalette) var palette
     @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
             Image(systemName: "gearshape")
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(hovering ? Palette.digit : Palette.label)
+                .foregroundStyle(hovering ? palette.digit : palette.label)
                 .frame(width: 28, height: 28)
                 .background(
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(hovering ? Palette.hover : Color.clear)
+                        .fill(hovering ? palette.hover : Color.clear)
                 )
                 .contentShape(Rectangle())
         }
@@ -261,6 +323,7 @@ struct SettingsGearButton: View {
 /// DIN Condensed 的上下留白不对称，用 Core Text 按大写高度（数字高度）定位基线，保证视觉居中
 struct DigitFace: View {
     let value: String
+    @Environment(\.cardPalette) var palette
     let color: Color
     var showsTile = true
     var showsDigits = true
@@ -270,7 +333,7 @@ struct DigitFace: View {
             if showsTile {
                 ctx.fill(Path(roundedRect: CGRect(origin: .zero, size: size),
                               cornerRadius: Metrics.tileRadius, style: .continuous),
-                         with: .color(Palette.tile))
+                         with: .color(palette.tile))
             }
             guard showsDigits else { return }
             ctx.withCGContext { cg in
