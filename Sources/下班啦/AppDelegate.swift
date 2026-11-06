@@ -41,8 +41,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupReminders() {
         bubble.anchorProvider = { [weak self] in self?.statusItemScreenFrame() }
-        reminders.present = { [weak self] url, force in
-            self?.bubble.show(videoURL: url, force: force) ?? false
+        reminders.present = { [weak self] url, force, loop, onDismiss in
+            self?.bubble.show(videoURL: url, loop: loop, force: force, onDismiss: onDismiss) ?? false
         }
         reminders.start()
     }
@@ -212,13 +212,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if settingsWindow == nil {
             // 固定尺寸窗口：不让窗口跟随 SwiftUI 内容尺寸变化，避免布局循环导致崩溃
             let hosting = NSHostingView(rootView: SettingsView(model: model, reminders: reminders))
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 560),
-                                  styleMask: [.titled, .closable],
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0,
+                                                      width: SettingsMetrics.windowWidth,
+                                                      height: SettingsMetrics.windowHeight),
+                                  styleMask: [.titled, .closable, .fullSizeContentView],
                                   backing: .buffered, defer: false)
             window.contentView = hosting
             window.title = "下班啦设置"
-            // 标题栏与面板背景同色（#222120），避免标题栏和内容区出现色差
+            // 参考系统设置：内容铺到标题栏下面，系统标题隐藏，标题由右侧内容区自己画
             window.titlebarAppearsTransparent = true
+            window.titleVisibility = .hidden
+            // 空的 unified 工具栏让标题栏变成 52pt 高，红黄绿按钮下移，落在侧边栏面板里
+            let toolbar = NSToolbar(identifier: "SettingsToolbar")
+            toolbar.showsBaselineSeparator = false
+            window.toolbar = toolbar
+            window.toolbarStyle = .unified
             window.isReleasedWhenClosed = false
             applySettingsAppearance(window)
             // 切换背景时，标题栏和系统控件（开关、菜单）跟着变深/浅
@@ -231,6 +239,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .store(in: &cancellables)
             window.center()
             settingsWindow = window
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { window.invalidateShadow() }
         }
         NSApp.activate(ignoringOtherApps: true)
         settingsWindow?.makeKeyAndOrderFront(nil)
@@ -240,7 +249,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func applySettingsAppearance(_ window: NSWindow) {
         let palette = SettingsPalette.of(model.background)
         window.appearance = NSAppearance(named: model.background == .light ? .aqua : .darkAqua)
-        window.backgroundColor = palette.nsWindow
+        // 窗口透明，外形由 SwiftUI 的大圆角背景决定；palette.nsWindow 不再用于窗口底色
+        _ = palette
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = true
+        // 阴影按内容的透明区域重算，才能贴合自绘圆角
+        DispatchQueue.main.async { window.invalidateShadow() }
     }
 
     // MARK: - 主菜单（⌘, 设置、⌘W 关闭、编辑快捷键）

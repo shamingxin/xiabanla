@@ -1,12 +1,47 @@
 import Foundation
 import Combine
 import AppKit
+import SwiftUI
 
-/// 背景样式：黑色 / 白色 / 用户上传的图片
+/// 背景样式（深浅模式）：深色 / 浅色
+/// 曾支持「图片」第三态（.image），已下线；枚举保留该 case 仅用于老用户数据迁移兜底，不再对外暴露入口
 enum AppBackground: String, CaseIterable, Identifiable, Codable {
     case dark = "黑色"
     case light = "白色"
     case image = "图片"
+
+    var id: String { rawValue }
+}
+
+/// 主题色预设：控制开关、倒计时数字、选中态等强调色；用户也可以自定义十六进制颜色
+/// 「已下班」固定绿色不受此影响（CardPalette.overtime 写死）
+enum AccentPreset: String, CaseIterable, Identifiable {
+    case neonGreen = "荧光绿"
+    case rhineBlue = "莱茵蓝"
+    case yellow = "黄"
+    case pink = "粉"
+    case red = "红"
+
+    var id: String { rawValue }
+
+    /// 预设色值（不含 #）
+    var hex: String {
+        switch self {
+        case .neonGreen: return "39FF14"
+        case .rhineBlue: return "0057FF"
+        case .yellow: return "FED501"
+        case .pink: return "FF6B9D"
+        case .red: return "FF3B30"
+        }
+    }
+}
+
+/// 倒计时主卡片的数字呈现样式，只影响主卡片（CountdownCardView），不影响「今日工作」点阵面板
+enum CountdownStyle: String, CaseIterable, Identifiable, Codable {
+    /// 翻页数字牌：现状默认样式，数字变化时上下翻片
+    case flip = "翻页"
+    /// 仿灵动岛：粗体无衬线裸数字，变化时弹性缩放跳动
+    case dynamicIsland = "灵动岛"
 
     var id: String { rawValue }
 }
@@ -81,6 +116,23 @@ final class WorkTimerModel: ObservableObject {
         }
     }
 
+    /// 主题色十六进制字符串（不含 #），默认黄色，兼容老用户的固定黄色强调色
+    @Published var accentColorHex: String {
+        didSet { UserDefaults.standard.set(accentColorHex, forKey: Keys.accentColorHex) }
+    }
+
+    /// 主题色实际颜色；十六进制解析失败时退回默认黄色
+    var accentColor: Color {
+        Self.color(fromHex: accentColorHex) ?? Self.color(fromHex: AccentPreset.yellow.hex)!
+    }
+
+    var accentNSColor: NSColor { NSColor(accentColor) }
+
+    /// 倒计时主卡片样式，默认沿用现状「翻页」
+    @Published var countdownStyle: CountdownStyle {
+        didSet { UserDefaults.standard.set(countdownStyle.rawValue, forKey: Keys.countdownStyle) }
+    }
+
     // MARK: - 当日状态
 
     /// 今天实际到岗时间，nil 表示今天还没记录
@@ -110,6 +162,8 @@ final class WorkTimerModel: ObservableObject {
         static let launchAtLogin = "launchAtLogin"
         static let background = "background"
         static let backgroundImagePath = "backgroundImagePath"
+        static let accentColorHex = "accentColorHex"
+        static let countdownStyle = "countdownStyle"
         static let todayStartTime = "todayStartTime"
         static let todayStartDay = "todayStartDay"
         static let pausedSeconds = "overtimePausedSeconds"
@@ -124,8 +178,13 @@ final class WorkTimerModel: ObservableObject {
         self.startText = defaults.string(forKey: Keys.startTime) ?? Self.defaultStartText
         self.latestText = defaults.string(forKey: Keys.latestTime) ?? Self.defaultLatestText
         self.launchAtLogin = defaults.bool(forKey: Keys.launchAtLogin)
-        self.background = AppBackground(rawValue: defaults.string(forKey: Keys.background) ?? "") ?? .dark
+        var restoredBackground = AppBackground(rawValue: defaults.string(forKey: Keys.background) ?? "") ?? .dark
+        // 图片背景已下线：老用户如果停留在图片态，自动回退深色，不再读取图片路径
+        if restoredBackground == .image { restoredBackground = .dark }
+        self.background = restoredBackground
         self.backgroundImagePath = defaults.string(forKey: Keys.backgroundImagePath)
+        self.accentColorHex = defaults.string(forKey: Keys.accentColorHex) ?? AccentPreset.yellow.hex
+        self.countdownStyle = CountdownStyle(rawValue: defaults.string(forKey: Keys.countdownStyle) ?? "") ?? .flip
         self.workdayKey = Self.workdayKey(for: Date())
 
         // 老数据里区间可能是反的（旧版没有区间结束），直接恢复默认
@@ -355,6 +414,16 @@ final class WorkTimerModel: ObservableObject {
     }
 
     // MARK: - 工具
+
+    /// 十六进制字符串（6 位，不含 #）转 Color；格式不对返回 nil
+    static func color(fromHex hex: String) -> Color? {
+        var h = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if h.hasPrefix("#") { h.removeFirst() }
+        guard h.count == 6, let v = UInt32(h, radix: 16) else { return nil }
+        return Color(red: Double((v >> 16) & 0xFF) / 255,
+                     green: Double((v >> 8) & 0xFF) / 255,
+                     blue: Double(v & 0xFF) / 255)
+    }
 
     private static let dayFormatter: DateFormatter = {
         let f = DateFormatter()

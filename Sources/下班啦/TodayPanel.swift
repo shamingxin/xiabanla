@@ -3,7 +3,7 @@ import AppKit
 
 /// 「今日工作」设备面板：设置里改得最频繁的一块，做成实体计时器的样子和下面的列表拉开差异
 /// - 左：黑色屏幕，DIN Condensed 大号到岗时间，底部一行「下班 19:00」
-/// - 右：灰色机身。已到岗放胶囊上下键；未到岗放橙色 ✓（现在开始）+「补填」
+/// - 右：灰色机身。已到岗放胶囊上下键；未到岗放黄色 ✓（现在开始）+「补填」
 /// - 点选屏幕上的小时 / 分钟可直接键盘输入，↑↓ 调整；上下键默认调分钟，选中小时后调小时
 struct TodayPanel: View {
     @ObservedObject var model: WorkTimerModel
@@ -11,7 +11,7 @@ struct TodayPanel: View {
     let arrivalGuess: () -> Date
     @StateObject private var edit = TimeEditState()
     @Environment(\.colorScheme) private var scheme
-    private var p: TodayPalette { .of(scheme) }
+    private var p: TodayPalette { .of(scheme, accent: model.accentColor, nsAccent: model.accentNSColor) }
 
     var body: some View {
         HStack(spacing: 14) {
@@ -136,7 +136,7 @@ enum TodayStyle {
 }
 
 /// 面板配色：跟设置窗口同一色系（深色 #222120 / 卡片 #2D2B2A），机身只比卡片亮一档
-/// 橙色降饱和，只用在下班时间、选中段和 ✓ 键上
+/// 强调色 #FED501（黄），只用在下班时间、选中段和 ✓ 键上
 struct TodayPalette {
     var shellTop: Color
     var shellBottom: Color
@@ -163,38 +163,50 @@ struct TodayPalette {
     private static func hex(_ v: UInt32) -> Color {
         Color(red: Double((v >> 16) & 0xFF) / 255, green: Double((v >> 8) & 0xFF) / 255, blue: Double(v & 0xFF) / 255)
     }
-    private static let accentHex: UInt32 = 0xD98A68
-    private static let nsAccent = NSColor(srgbRed: 0xD9 / 255, green: 0x8A / 255, blue: 0x68 / 255, alpha: 1)
+    /// 默认强调色（黄）：兜底值，用户没有设置主题色时使用
+    private static let defaultAccentHex: UInt32 = 0xFED501
+    private static let defaultNSAccent = NSColor(srgbRed: 0xFE / 255, green: 0xD5 / 255, blue: 0x01 / 255, alpha: 1)
 
-    static let dark = TodayPalette(
-        shellTop: hex(0x3A3836), shellBottom: hex(0x33312F),
-        rimTop: Color.white.opacity(0.08), rimBottom: Color.black.opacity(0.3),
-        shadow: Color.black.opacity(0.25),
-        screen: hex(0x171615), screenStroke: Color.black.opacity(0.4),
-        digit: NSColor(srgbRed: 0xE6 / 255, green: 0xE3 / 255, blue: 0xDE / 255, alpha: 1),
-        dim: hex(0x85817C),
-        accent: hex(accentHex), nsAccent: nsAccent,
-        engrave: hex(0xA9A49E),
-        keyTop: hex(0x5E5B57), keyBottom: hex(0x524F4B),
-        keyPressedTop: hex(0x3E3C39), keyPressedBottom: hex(0x383633),
-        keyArrow: hex(0xD2CEC8), keyStroke: Color.black.opacity(0.45), keyDivider: Color.black.opacity(0.35),
-        confirmTop: hex(0xC9805F), confirmBottom: hex(0xB36E50))
+    /// 用默认黄色强调色构造，仅用于静态占位（如 TimeDisplayView 的属性初始值）
+    static let dark = TodayPalette(scheme: .dark, accent: hex(defaultAccentHex), nsAccent: defaultNSAccent)
+    static let light = TodayPalette(scheme: .light, accent: hex(defaultAccentHex), nsAccent: defaultNSAccent)
 
-    static let light = TodayPalette(
-        shellTop: hex(0xEFEDEA), shellBottom: hex(0xE6E3DF),
-        rimTop: Color.white.opacity(0.8), rimBottom: Color.black.opacity(0.08),
-        shadow: Color.black.opacity(0.08),
-        screen: hex(0x2B2A28), screenStroke: Color.black.opacity(0.15),
-        digit: NSColor(srgbRed: 0xEC / 255, green: 0xE9 / 255, blue: 0xE4 / 255, alpha: 1),
-        dim: hex(0x8C8984),
-        accent: hex(accentHex), nsAccent: nsAccent,
-        engrave: hex(0x6E6A64),
-        keyTop: hex(0xFFFFFF), keyBottom: hex(0xF2F0ED),
-        keyPressedTop: hex(0xE3E0DC), keyPressedBottom: hex(0xDAD7D3),
-        keyArrow: hex(0x5A5650), keyStroke: Color.black.opacity(0.12), keyDivider: Color.black.opacity(0.1),
-        confirmTop: hex(0xDB9070), confirmBottom: hex(0xC97C5C))
+    /// - Parameters:
+    ///   - scheme: 深浅模式
+    ///   - accent: 用户在设置里选的主题色；默认黄色
+    ///   - nsAccent: 同上的 NSColor 版本，供 AppKit 组件使用
+    init(scheme: ColorScheme, accent: Color, nsAccent: NSColor) {
+        let isLight = scheme == .light
+        shellTop = Self.hex(isLight ? 0xEFEDEA : 0x3A3836)
+        shellBottom = Self.hex(isLight ? 0xE6E3DF : 0x33312F)
+        rimTop = isLight ? Color.white.opacity(0.8) : Color.white.opacity(0.08)
+        rimBottom = isLight ? Color.black.opacity(0.08) : Color.black.opacity(0.3)
+        shadow = isLight ? Color.black.opacity(0.08) : Color.black.opacity(0.25)
+        screen = Self.hex(isLight ? 0x2B2A28 : 0x171615)
+        screenStroke = isLight ? Color.black.opacity(0.15) : Color.black.opacity(0.4)
+        digit = isLight ? NSColor(srgbRed: 0xEC / 255, green: 0xE9 / 255, blue: 0xE4 / 255, alpha: 1)
+                        : NSColor(srgbRed: 0xE6 / 255, green: 0xE3 / 255, blue: 0xDE / 255, alpha: 1)
+        dim = Self.hex(isLight ? 0x8C8984 : 0x85817C)
+        self.accent = accent
+        self.nsAccent = nsAccent
+        engrave = Self.hex(isLight ? 0x6E6A64 : 0xA9A49E)
+        keyTop = Self.hex(isLight ? 0xFFFFFF : 0x5E5B57)
+        keyBottom = Self.hex(isLight ? 0xF2F0ED : 0x524F4B)
+        keyPressedTop = Self.hex(isLight ? 0xE3E0DC : 0x3E3C39)
+        keyPressedBottom = Self.hex(isLight ? 0xDAD7D3 : 0x383633)
+        keyArrow = Self.hex(isLight ? 0x5A5650 : 0xD2CEC8)
+        keyStroke = isLight ? Color.black.opacity(0.12) : Color.black.opacity(0.45)
+        keyDivider = isLight ? Color.black.opacity(0.1) : Color.black.opacity(0.35)
+        confirmTop = Self.hex(0xFFDC2A)
+        confirmBottom = Self.hex(0xE8C200)
+    }
 
     static func of(_ scheme: ColorScheme) -> TodayPalette { scheme == .light ? .light : .dark }
+
+    /// 带用户主题色的版本：设置面板、今日工作面板都用这个
+    static func of(_ scheme: ColorScheme, accent: Color, nsAccent: NSColor) -> TodayPalette {
+        TodayPalette(scheme: scheme, accent: accent, nsAccent: nsAccent)
+    }
 }
 
 // MARK: - 胶囊上下键
@@ -239,7 +251,7 @@ struct StepperHalfStyle: ButtonStyle {
     }
 }
 
-/// 橙色圆形确认键：外圈细虚线 + 对勾，按下缩一点、变暗
+/// 黄色圆形确认键：外圈细虚线 + 对勾，按下缩一点、变暗
 struct ConfirmKeyStyle: ButtonStyle {
     let palette: TodayPalette
     func makeBody(configuration: Configuration) -> some View {
@@ -254,7 +266,7 @@ struct ConfirmKeyStyle: ButtonStyle {
                 .stroke(Color.black.opacity(0.25), style: StrokeStyle(lineWidth: 1, dash: [1, 2.5]))
             Image(systemName: "checkmark")
                 .font(.system(size: 16, weight: .heavy))
-                .foregroundStyle(Color(red: 0.20, green: 0.13, blue: 0.10))
+                .foregroundStyle(Color(red: 0.16, green: 0.13, blue: 0.0))
         }
         .frame(width: 44, height: 44)
         .overlay(Circle().strokeBorder(palette.keyStroke, lineWidth: 1))

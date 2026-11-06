@@ -6,66 +6,223 @@ import UniformTypeIdentifiers
 /// - 组标题：13pt 半粗，与行内文字左对齐
 /// - 分组卡片：半透明浅色底、12pt 圆角、无描边，行间细分隔线
 /// - 说明文字：次级色、11pt、左对齐，放在卡片下方
+/// 设置面板侧边栏分区：对应系统设置左侧列表
+enum SettingsSidebarItem: String, CaseIterable, Identifiable {
+    case workHours = "工作时长"
+    case reminderAnimations = "提醒动画"
+    case general = "通用"
+    case appearance = "外观"
+    case about = "关于"
+
+    var id: String { rawValue }
+
+    /// 实心图标，放在彩色圆角方块里（系统设置左栏同款）
+    var icon: String {
+        switch self {
+        case .workHours: return "clock.fill"
+        case .reminderAnimations: return "bell.fill"
+        case .general: return "gearshape.fill"
+        case .appearance: return "circle.lefthalf.filled"
+        case .about: return "info.circle.fill"
+        }
+    }
+
+    /// 图标底色：分类色，固定不随主题色变化（和系统设置一样，每个分区一种颜色）
+    var tint: Color {
+        switch self {
+        case .workHours: return Color(red: 1.0, green: 0.584, blue: 0.0)      // 橙
+        case .reminderAnimations: return Color(red: 1.0, green: 0.231, blue: 0.188) // 红
+        case .general: return Color(red: 0.557, green: 0.557, blue: 0.576)    // 灰
+        case .appearance: return Color(red: 0.11, green: 0.11, blue: 0.118)    // 黑（系统设置「外观」同款）
+        case .about: return Color(red: 0.0, green: 0.478, blue: 1.0)          // 蓝
+        }
+    }
+}
+
+/// 左侧分区列表：参考 macOS 26 系统设置
+/// - 整块是内缩的浮起圆角面板（细描边），窗口红黄绿按钮落在面板顶部
+/// - 每行：20pt 彩色圆角方块图标 + 13pt 文字，行高 32
+/// - 选中态：主题色实底，文字按底色亮度自动取黑/白
+struct SettingsSidebar: View {
+    @Binding var selection: SettingsSidebarItem
+    @Environment(\.settingsPalette) private var palette
+    @Environment(\.themeAccent) private var accent
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(SettingsSidebarItem.allCases) { item in
+                row(item)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        // 顶部留出红黄绿按钮的位置（标题栏 52pt 高，面板从 8pt 开始）
+        .padding(.top, SettingsMetrics.toolbarHeight - SettingsMetrics.sidebarInset + 4)
+        .padding(.bottom, 10)
+        .frame(width: SettingsMetrics.sidebarWidth)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(
+            RoundedRectangle(cornerRadius: SettingsMetrics.sidebarRadius, style: .continuous)
+                .fill(palette.sidebar.opacity(palette.sidebarTintOpacity))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: SettingsMetrics.sidebarRadius, style: .continuous)
+                .strokeBorder(palette.sidebarStroke, lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.12), radius: 6, y: 1)
+        .padding([.leading, .top, .bottom], SettingsMetrics.sidebarInset)
+    }
+
+    private func row(_ item: SettingsSidebarItem) -> some View {
+        let selected = selection == item
+        return Button(action: { selection = item }) {
+            HStack(spacing: 8) {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(item.tint.gradient)
+                    .frame(width: 20, height: 20)
+                    .overlay(
+                        Image(systemName: item.icon)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.white)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .strokeBorder(Color.white.opacity(selected ? 0.35 : 0), lineWidth: 0.5)
+                    )
+                Text(item.rawValue)
+                    .font(.system(size: 13))
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(selected ? accent.contrastingText : Color.primary)
+            .padding(.horizontal, 6)
+            .frame(height: 32)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(selected ? accent : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(item.rawValue)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+extension Color {
+    /// 放在这个颜色上的文字该用黑还是白：按 sRGB 相对亮度判断（黄、荧光绿用黑字，蓝、红用白字）
+    var contrastingText: Color {
+        guard let c = NSColor(self).usingColorSpace(.sRGB) else { return .white }
+        func lin(_ v: CGFloat) -> CGFloat { v <= 0.03928 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4) }
+        let l = 0.2126 * lin(c.redComponent) + 0.7152 * lin(c.greenComponent) + 0.0722 * lin(c.blueComponent)
+        return l > 0.4 ? Color.black.opacity(0.85) : .white
+    }
+}
+
 struct SettingsView: View {
     @ObservedObject var model: WorkTimerModel
     @ObservedObject var reminders: ReminderModel
     /// 顶部 toast 文案，nil 时隐藏
     @State private var toast: String?
     @State private var toastToken = 0
-    @State private var showAbout = false
+    /// 当前选中的侧边栏分区，默认「工作时长」
+    @State private var selectedSection: SettingsSidebarItem = .workHours
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                todaySection
-                workSection
-                // 一个标题下两张独立卡片，参考系统设置「外观 › 主题」
-                SettingsGroup("提醒") {
-                    SettingsCard { waterRows }
-                    SettingsCard { eggRows }
-                    SettingsCard { offWorkRows }
-                }
-                SettingsSection("通用") {
-                    SettingsRow("登录时打开") {
-                        SettingsSwitch(isOn: $model.launchAtLogin)
-                    }
-                    SettingsDivider()
-                    SettingsRow("主题色") {
-                        BackgroundPicker(model: model)
-                    }
-                    SettingsDivider()
-                    Button(action: { showAbout = true }) {
-                        SettingsRow("关于下班啦") {
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.secondary)
+        HStack(spacing: 0) {
+            SettingsSidebar(selection: $selectedSection)
+            VStack(spacing: 0) {
+                // 工具栏行：标题和窗口红黄绿按钮同一水平线，参考系统设置「外观」页顶部
+                Text(selectedSection.rawValue)
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, SettingsMetrics.contentPadding)
+                    .frame(height: SettingsMetrics.toolbarHeight)
+                    .accessibilityAddTraits(.isHeader)
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        switch selectedSection {
+                        case .workHours:
+                            todaySection
+                            workSection
+                        case .reminderAnimations:
+                            SettingsCard { waterRows }
+                            SettingsCard { eggRows }
+                            SettingsCard { offWorkRows }
+                        case .general:
+                            SettingsCard {
+                                SettingsRow("登录时打开") {
+                                    SettingsSwitch(isOn: $model.launchAtLogin)
+                                }
+                            }
+                        case .appearance:
+                            // 页面标题已经是「外观」，卡片上方不再重复小标题
+                            SettingsCard {
+                                // 参考系统设置「外观」行：标签左上，右侧窗口缩略图 + 下方文字
+                                HStack(alignment: .top, spacing: 12) {
+                                    Text("深浅模式").font(.system(size: 13))
+                                        .padding(.top, 2)
+                                    Spacer(minLength: 8)
+                                    BackgroundPicker(model: model)
+                                }
+                                .padding(.horizontal, SettingsMetrics.inset)
+                                .padding(.vertical, 12)
+                                SettingsDivider()
+                                SettingsRow("主题色") {
+                                    AccentColorPicker(model: model)
+                                }
+                            }
+                            // 倒计时样式单独成组：可视化预览网格，参考系统设置「墙纸」，后续加样式直接往枚举里加
+                            VStack(alignment: .leading, spacing: 0) {
+                                SettingsHeader("倒计时样式")
+                                CountdownStylePicker(model: model)
+                            }
+                        case .about:
+                            AboutView()
                         }
                     }
-                    .buttonStyle(.plain)
-                    .contentShape(Rectangle())
+                    .padding(.horizontal, SettingsMetrics.contentPadding)
+                    .padding(.top, 4)
+                    .padding(.bottom, 24)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 16)
-            .padding(.bottom, 24)
+            .frame(width: SettingsMetrics.contentWidth)
         }
-        .frame(width: 460, height: 560)
-        .background(SettingsPalette.of(model.background).window)
+        .frame(width: SettingsMetrics.windowWidth, height: SettingsMetrics.windowHeight)
+        // 窗口外框圆角自己画：用 15.x SDK 编译时系统只给小圆角，和 macOS 26 系统设置对不上
+        // 窗口本身是透明的（见 AppDelegate.applySettingsAppearance），可见形状完全由这里决定
+        .background(
+            ZStack {
+                // 透出窗口后方桌面的模糊，参考系统设置
+                SettingsBlurBackground(light: model.background == .light,
+                                       cornerRadius: SettingsMetrics.windowRadius)
+                // 内容区压一层较实的底色；侧边栏区域挖空，侧边栏自己铺更透的底，所以左边透出更多壁纸色
+                WindowTintShape()
+                    .fill(SettingsPalette.of(model.background).window
+                            .opacity(SettingsPalette.of(model.background).windowTintOpacity),
+                          style: FillStyle(eoFill: true))
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: SettingsMetrics.windowRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: SettingsMetrics.windowRadius, style: .continuous)
+                .strokeBorder(SettingsPalette.of(model.background).windowStroke, lineWidth: 1)
+        )
         .environment(\.settingsPalette, SettingsPalette.of(model.background))
         .environment(\.colorScheme, model.background == .light ? .light : .dark)
-        .sheet(isPresented: $showAbout) {
-            AboutView()
-                .environment(\.settingsPalette, SettingsPalette.of(model.background))
-                .environment(\.colorScheme, model.background == .light ? .light : .dark)
-        }
+        .environment(\.themeAccent, model.accentColor)
         .overlay(alignment: .top) {
             if let toast {
                 ToastView(text: toast)
-                    .padding(.top, 10)
+                    .padding(.top, SettingsMetrics.toolbarHeight)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .animation(.easeOut(duration: 0.2), value: toast)
+        // 必须放在最外层：整块（含圆角背景和裁切）铺到标题栏下面（窗口是 fullSizeContentView）
+        // 放在里层的话，外层圆角背景仍按安全区排版，会把顶部 52pt 裁掉、红黄绿按钮露在窗口外
+        .ignoresSafeArea()
     }
 
     /// 显示 2.5 秒 toast，并让读屏读出来
@@ -140,6 +297,10 @@ struct SettingsView: View {
                                    options: ReminderModel.waterIntervals) { Self.minutesText($0) }
                 }
                 SettingsDivider()
+                SettingsRow("强制提醒", subtitle: "需手动关闭动画") {
+                    SettingsSwitch(isOn: $reminders.waterSticky)
+                }
+                SettingsDivider()
                 videoRow(.water)
             }
     }
@@ -148,7 +309,7 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var eggRows: some View {
-            SettingsRow("小彩蛋") { SettingsSwitch(isOn: $reminders.eggEnabled) }
+            SettingsRow("随机彩蛋") { SettingsSwitch(isOn: $reminders.eggEnabled) }
             if reminders.eggEnabled {
                 SettingsDivider()
                 SettingsRow("提醒间隔") {
@@ -295,7 +456,7 @@ struct SettingsCard<Content: View>: View {
     var body: some View {
         VStack(spacing: 0) { content }
             .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                RoundedRectangle(cornerRadius: SettingsMetrics.cardRadius, style: .continuous)
                     .fill(palette.card)
             )
     }
@@ -531,11 +692,12 @@ struct SettingsSwitch: View {
     }
 }
 
-/// 自绘开关：开启时用「今日工作」面板的橙色强调色
+/// 自绘开关：开启时用「今日工作」面板的强调色
 /// 系统开关跟随系统强调色，窗口失焦还会变灰，所以自己画，保证颜色稳定
 struct AccentSwitchStyle: ToggleStyle {
     @Environment(\.settingsPalette) private var palette
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.themeAccent) private var accent
 
     func makeBody(configuration: Configuration) -> some View {
         let on = configuration.isOn
@@ -543,7 +705,7 @@ struct AccentSwitchStyle: ToggleStyle {
         return Button { configuration.isOn.toggle() } label: {
             ZStack(alignment: on ? .trailing : .leading) {
                 Capsule()
-                    .fill(on ? TodayPalette.dark.accent : offTrack)
+                    .fill(on ? accent : offTrack)
                     .overlay(Capsule().strokeBorder(Color.black.opacity(0.08), lineWidth: 0.5))
                 Circle()
                     .fill(Color.white)
@@ -596,22 +758,45 @@ struct SettingsPalette {
     /// 下拉箭头的小圆底
     var chevronBase: Color
     var toast: Color
+    /// 侧边栏浮起面板底色与描边
+    var sidebar: Color
+    var sidebarStroke: Color
+    /// 自绘窗口外框描边（代替系统窗口边缘的细高光线）
+    var windowStroke: Color
+    /// 背景模糊上压的底色不透明度：内容区较实、侧边栏较透
+    var windowTintOpacity: Double
+    var sidebarTintOpacity: Double
     var nsWindow: NSColor
 
+    // 参考 macOS 26 系统设置：三层都是半透明，叠在窗口底部的背景模糊上
+    // - 侧边栏：底色最透，壁纸颜色透出最明显
+    // - 内容区：底色较实，只隐约透一点
+    // - 卡片：在内容区上再叠一层很淡的白（深色）/ 黑（浅色），本身不遮挡模糊
+    // 底色用中性冷灰，不再用偏暖的 #222120，避免和壁纸色调打架
     static let dark = SettingsPalette(
-        window: Color(red: 0x22 / 255, green: 0x21 / 255, blue: 0x20 / 255),
-        card: Color(red: 0x2D / 255, green: 0x2B / 255, blue: 0x2A / 255),
-        separator: Color.white.opacity(0.07),
+        window: Color(red: 0x1F / 255, green: 0x20 / 255, blue: 0x23 / 255),
+        card: Color.white.opacity(0.055),
+        separator: Color.white.opacity(0.08),
         chevronBase: Color.white.opacity(0.1),
         toast: Color(white: 0.24),
-        nsWindow: NSColor(srgbRed: 0x22 / 255, green: 0x21 / 255, blue: 0x20 / 255, alpha: 1))
+        sidebar: Color(red: 0x1F / 255, green: 0x20 / 255, blue: 0x23 / 255),
+        sidebarStroke: Color.white.opacity(0.1),
+        windowStroke: Color.white.opacity(0.14),
+        windowTintOpacity: 0.78,
+        sidebarTintOpacity: 0.3,
+        nsWindow: NSColor(srgbRed: 0x1F / 255, green: 0x20 / 255, blue: 0x23 / 255, alpha: 1))
 
     static let light = SettingsPalette(
         window: .white,
-        card: Color(red: 0xF7 / 255, green: 0xF7 / 255, blue: 0xF7 / 255),
-        separator: Color(red: 0xEB / 255, green: 0xEB / 255, blue: 0xEB / 255),
-        chevronBase: Color(red: 0xE4 / 255, green: 0xE4 / 255, blue: 0xE4 / 255),
+        card: Color.black.opacity(0.035),
+        separator: Color.black.opacity(0.07),
+        chevronBase: Color.black.opacity(0.07),
         toast: .white,
+        sidebar: .white,
+        sidebarStroke: Color.black.opacity(0.06),
+        windowStroke: Color.black.opacity(0.12),
+        windowTintOpacity: 0.8,
+        sidebarTintOpacity: 0.35,
         nsWindow: .white)
 
     static func of(_ background: AppBackground) -> SettingsPalette {
@@ -627,6 +812,19 @@ extension EnvironmentValues {
     var settingsPalette: SettingsPalette {
         get { self[SettingsPaletteKey.self] }
         set { self[SettingsPaletteKey.self] = newValue }
+    }
+}
+
+/// 主题色环境值：用户在「主题色」行选择的强调色，开关、选中态等统一从这里取
+/// 默认黄色兜底，SettingsView 根部用 model.accentColor 覆盖
+private struct ThemeAccentKey: EnvironmentKey {
+    static let defaultValue = WorkTimerModel.color(fromHex: AccentPreset.yellow.hex)!
+}
+
+extension EnvironmentValues {
+    var themeAccent: Color {
+        get { self[ThemeAccentKey.self] }
+        set { self[ThemeAccentKey.self] = newValue }
     }
 }
 
@@ -670,85 +868,372 @@ struct TimeField: NSViewRepresentable {
     }
 }
 
+/// 设置窗口的背景模糊：透出窗口后方的桌面（behindWindow），随深浅模式切换外观
+/// 用遮罩图做圆角，SwiftUI 的 clipShape 裁不到 NSVisualEffectView 的模糊层
+struct SettingsBlurBackground: NSViewRepresentable {
+    var light: Bool
+    var cornerRadius: CGFloat
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.blendingMode = .behindWindow
+        view.state = .active
+        view.material = .underWindowBackground
+        view.maskImage = Self.maskImage(cornerRadius: cornerRadius)
+        update(view)
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) { update(view) }
+
+    private func update(_ view: NSVisualEffectView) {
+        view.appearance = NSAppearance(named: light ? .aqua : .darkAqua)
+    }
+
+    private static func maskImage(cornerRadius r: CGFloat) -> NSImage {
+        let edge = r * 2 + 1
+        let image = NSImage(size: NSSize(width: edge, height: edge), flipped: false) { rect in
+            NSColor.black.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: r, yRadius: r).fill()
+            return true
+        }
+        image.capInsets = NSEdgeInsets(top: r, left: r, bottom: r, right: r)
+        image.resizingMode = .stretch
+        return image
+    }
+}
+
+/// 整个窗口减去侧边栏面板的形状（配合 eoFill 使用），让内容区和侧边栏各自控制透明度
+struct WindowTintShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.addRect(rect)
+        let m = SettingsMetrics.self
+        let sidebar = CGRect(x: rect.minX + m.sidebarInset, y: rect.minY + m.sidebarInset,
+                             width: m.sidebarWidth, height: rect.height - m.sidebarInset * 2)
+        p.addRoundedRect(in: sidebar, cornerSize: CGSize(width: m.sidebarRadius, height: m.sidebarRadius),
+                         style: .continuous)
+        return p
+    }
+}
+
 enum SettingsMetrics {
     /// 卡片内左右边距，标题和说明文字也与之对齐
     static let inset: CGFloat = 12
+    /// 窗口标题栏（带空工具栏）高度，红黄绿按钮垂直居中在这一行
+    static let toolbarHeight: CGFloat = 52
+    /// 侧边栏浮起面板：距窗口边缘内缩、宽度、圆角
+    static let sidebarInset: CGFloat = 8
+    static let sidebarWidth: CGFloat = 190
+    static let sidebarRadius: CGFloat = 20
+    /// 内容卡片圆角
+    static let cardRadius: CGFloat = 16
+    /// 右侧内容区宽度（「今日工作」面板按这个宽度设计，不要改）与左右留白
+    static let contentWidth: CGFloat = 480
+    static let contentPadding: CGFloat = 20
+    /// 窗口固定尺寸：不随内容自适应，避免布局循环
+    static let windowWidth: CGFloat = sidebarInset + sidebarWidth + contentWidth
+    static let windowHeight: CGFloat = 560
+    /// 窗口外框圆角：和侧边栏面板同心（内缩 8 + 面板圆角 20）
+    static let windowRadius: CGFloat = sidebarInset + sidebarRadius
 }
 
-/// 背景选择：黑色 / 白色色块 + 上传图片按钮
+/// 深浅模式选择：参考系统设置「外观」，窗口缩略图 + 下方文字，选中态主题色描边
+/// 顺序和系统一致：浅色在前、深色在后
+/// 曾有「上传图片」第三态，已下线（代码见 WidgetContainer.customImage 注释，未删除）
 struct BackgroundPicker: View {
     @ObservedObject var model: WorkTimerModel
+    @Environment(\.themeAccent) private var accent
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            option(.light, title: "浅色")
+            option(.dark, title: "深色")
+        }
+    }
+
+    private func option(_ value: AppBackground, title: String) -> some View {
+        let selected = model.background == value
+        return Button(action: { model.background = value }) {
+            VStack(spacing: 6) {
+                AppearanceThumbnail(light: value == .light)
+                    .padding(3)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(selected ? accent : Color.clear, lineWidth: 3)
+                    )
+                Text(title)
+                    .font(.system(size: 12, weight: selected ? .semibold : .regular))
+                    .foregroundStyle(selected ? Color.primary : Color.secondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// 深浅模式缩略图：蓝色渐变壁纸上叠两扇小窗（后窗带蓝色条，前窗带红黄绿三点）
+/// 浅色是白窗，深色是深灰窗，和系统设置「外观」缩略图同一画法
+struct AppearanceThumbnail: View {
+    let light: Bool
+
+    var body: some View {
+        let wallpaper: [Color] = light
+            ? [Color(red: 0.62, green: 0.78, blue: 1.0), Color(red: 0.18, green: 0.42, blue: 0.95)]
+            : [Color(red: 0.22, green: 0.20, blue: 0.62), Color(red: 0.06, green: 0.08, blue: 0.28)]
+        let backWindow = light ? Color(white: 0.94) : Color(red: 0.16, green: 0.16, blue: 0.22)
+        let frontWindow = light ? Color.white : Color(red: 0.11, green: 0.11, blue: 0.13)
+        let windowBlue = Color(red: 0.25, green: 0.47, blue: 1.0)
+
+        return ZStack(alignment: .topLeading) {
+            LinearGradient(colors: wallpaper, startPoint: .topLeading, endPoint: .bottomTrailing)
+
+            // 后窗：顶部一条蓝色高亮
+            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                .fill(backWindow)
+                .frame(width: 58, height: 26)
+                .overlay(alignment: .topLeading) {
+                    RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                        .fill(windowBlue)
+                        .frame(width: 40, height: 5)
+                        .padding(.top, 5)
+                        .padding(.leading, 5)
+                }
+                .offset(x: 5, y: 5)
+
+            // 前窗：红黄绿三点
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(frontWindow)
+                .frame(width: 40, height: 20)
+                .overlay {
+                    HStack(spacing: 3) {
+                        Circle().fill(Color(red: 1.0, green: 0.37, blue: 0.34))
+                        Circle().fill(Color(red: 1.0, green: 0.74, blue: 0.18))
+                        Circle().fill(Color(red: 0.16, green: 0.79, blue: 0.25))
+                    }
+                    .frame(height: 5)
+                }
+                .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+                .offset(x: 24, y: 24)
+        }
+        .frame(width: 68, height: 46, alignment: .topLeading)
+        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
+        )
+        .accessibilityHidden(true)
+    }
+}
+
+/// 主题色选择：5 个预设色块 + 自定义十六进制输入
+/// 选中态用一个细描边圈标出，和深浅模式的按钮高亮区分开（这里本身就是在挑颜色，不需要再用主题色描边）
+struct AccentColorPicker: View {
+    @ObservedObject var model: WorkTimerModel
+    @State private var customHex: String = ""
+    @State private var customInvalid = false
+
+    private var selectedPreset: AccentPreset? {
+        AccentPreset.allCases.first { $0.hex.caseInsensitiveCompare(model.accentColorHex) == .orderedSame }
+    }
 
     var body: some View {
         HStack(spacing: 10) {
-            swatch(.dark, fill: .black)
-            swatch(.light, fill: .white)
-            Button("上传图片…", action: pickImage)
-                .controlSize(.small)
+            ForEach(AccentPreset.allCases) { preset in
+                swatch(color: WorkTimerModel.color(fromHex: preset.hex) ?? .clear,
+                       selected: selectedPreset == preset) {
+                    model.accentColorHex = preset.hex
+                }
+                .help(preset.rawValue)
+                .accessibilityLabel(preset.rawValue)
+            }
+            customField
         }
+        .onAppear { syncCustomField() }
+        .onChange(of: model.accentColorHex) { _ in syncCustomField() }
     }
 
-    private func swatch(_ option: AppBackground, fill: Color) -> some View {
-        let selected = model.background == option
-        return Button(action: { model.background = option }) {
+    private func swatch(color: Color, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             Circle()
-                .fill(fill)
-                .frame(width: 18, height: 18)
-                .overlay(Circle().strokeBorder(Color.primary.opacity(0.25), lineWidth: 0.5))
-                .overlay {
-                    if selected {
-                        Circle().fill(fill == .white ? Color.black : Color.white).frame(width: 6, height: 6)
-                    }
-                }
-                .padding(3)
-                // 选中圈和开关同色：今日工作面板的橙色强调色
-                .overlay(Circle().strokeBorder(selected ? TodayPalette.dark.accent : .clear, lineWidth: 2))
+                .fill(color)
+                .frame(width: 20, height: 20)
+                .overlay(Circle().strokeBorder(Color.primary.opacity(0.15), lineWidth: 0.5))
+                .overlay(Circle().strokeBorder(selected ? Color.primary.opacity(0.8) : .clear, lineWidth: 2)
+                    .padding(-2.5))
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .help(option.rawValue)
-        .accessibilityLabel(option.rawValue)
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
-    /// 打开系统文件选择器，选中的图片拷贝到 App 的 Application Support 目录持久保存
-    private func pickImage() {
-        let panel = NSOpenPanel()
-        panel.title = "选择背景图片"
-        panel.allowedContentTypes = [.image]
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        if let saved = Self.persist(url) {
-            model.backgroundImagePath = saved
-            model.background = .image
+    /// 自定义十六进制输入：失焦或回车时校验，格式不对标红且不生效
+    /// 当前颜色不是任何预设（即用户在用自定义色）时，描边高亮，和预设色块的选中态呼应
+    private var customField: some View {
+        let isCustomSelected = selectedPreset == nil
+        return HStack(spacing: 6) {
+            Text("#").font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
+            TextField("自定义", text: $customHex)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12, design: .monospaced))
+                .frame(width: 64)
+                .onSubmit(applyCustomHex)
+                .onChange(of: customHex) { _ in customInvalid = false }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.primary.opacity(0.06))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(customInvalid ? Color.red.opacity(0.6)
+                              : (isCustomSelected ? Color.primary.opacity(0.8) : Color.clear),
+                              lineWidth: customInvalid || isCustomSelected ? 1.5 : 1)
+        )
+        .accessibilityAddTraits(isCustomSelected ? .isSelected : [])
+    }
+
+    private func applyCustomHex() {
+        guard WorkTimerModel.color(fromHex: customHex) != nil else {
+            customInvalid = true
+            return
+        }
+        var h = customHex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if h.hasPrefix("#") { h.removeFirst() }
+        model.accentColorHex = h.uppercased()
+        customInvalid = false
+    }
+
+    /// 当前颜色不是预设时，自定义框显示当前 hex；是预设时自定义框留空
+    private func syncCustomField() {
+        customHex = selectedPreset == nil ? model.accentColorHex : ""
+    }
+}
+
+/// 倒计时样式选择：参考系统设置「墙纸」，每个样式一张预览缩略图 + 下方名称，选中态主题色描边
+/// 3 列网格，遍历 CountdownStyle.allCases：以后新增样式只需在枚举里加一项、在 CountdownStylePreview 里画出预览
+/// 只影响主卡片（CountdownCardView），不影响「今日工作」点阵面板
+struct CountdownStylePicker: View {
+    @ObservedObject var model: WorkTimerModel
+    @Environment(\.themeAccent) private var accent
+
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top), count: 3)
+
+    var body: some View {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
+            ForEach(CountdownStyle.allCases) { style in
+                option(style)
+            }
         }
     }
 
-    /// 拷贝到 Application Support/下班啦/Backgrounds，避免原图被用户移动或删除后失效
-    private static func persist(_ source: URL) -> String? {
-        let fm = FileManager.default
-        guard let support = try? fm.url(for: .applicationSupportDirectory, in: .userDomainMask,
-                                        appropriateFor: nil, create: true) else { return nil }
-        let dir = support.appendingPathComponent("下班啦/Backgrounds", isDirectory: true)
-        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        let dest = dir.appendingPathComponent("custom.\(source.pathExtension.isEmpty ? "png" : source.pathExtension)")
-        try? fm.removeItem(at: dest)
-        do {
-            try fm.copyItem(at: source, to: dest)
-            return dest.path
-        } catch {
-            return nil
+    private func option(_ style: CountdownStyle) -> some View {
+        let selected = model.countdownStyle == style
+        return Button(action: { model.countdownStyle = style }) {
+            VStack(spacing: 7) {
+                CountdownStylePreview(style: style, light: model.background == .light)
+                    .padding(3)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 13, style: .continuous)
+                            .strokeBorder(selected ? accent : Color.clear, lineWidth: 3)
+                    )
+                Text(style.rawValue)
+                    .font(.system(size: 12, weight: selected ? .semibold : .regular))
+                    .foregroundStyle(selected ? Color.primary : Color.secondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("倒计时样式：\(style.rawValue)")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// 倒计时样式预览：主卡片数字区的缩小版（固定显示 08:42:16），跟随深浅模式
+/// 画法和 CountdownCardView 对应样式保持一致：翻页 = 半透明数字牌 + 中缝，灵动岛 = 圆体粗数字 + 冒号点
+struct CountdownStylePreview: View {
+    let style: CountdownStyle
+    let light: Bool
+
+    private let digits = ["08", "42", "16"]
+
+    var body: some View {
+        let palette = light ? CardPalette.light : CardPalette.dark
+        let background: [Color] = light
+            ? [Color(white: 0.97), Color(white: 0.88)]
+            : [Color(red: 0.24, green: 0.23, blue: 0.24), Color(red: 0.12, green: 0.12, blue: 0.13)]
+
+        return ZStack {
+            LinearGradient(colors: background, startPoint: .topLeading, endPoint: .bottomTrailing)
+            content(palette)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 78)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
+        )
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private func content(_ palette: CardPalette) -> some View {
+        switch style {
+        case .flip:
+            HStack(spacing: 4) {
+                ForEach(digits, id: \.self) { d in
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .fill(palette.tile)
+                        Text(d)
+                            .font(Font(NSFont(name: "DINCondensed-Bold", size: 26)
+                                       ?? .monospacedDigitSystemFont(ofSize: 21, weight: .bold)))
+                            .foregroundStyle(palette.digit)
+                            .offset(y: 2)
+                        // 翻页牌中缝
+                        Rectangle()
+                            .fill(light ? Color.white.opacity(0.9) : Color.black.opacity(0.45))
+                            .frame(height: 1)
+                    }
+                    .frame(width: 30, height: 30)
+                }
+            }
+        case .dynamicIsland:
+            HStack(spacing: 0) {
+                ForEach(Array(digits.enumerated()), id: \.offset) { i, d in
+                    if i > 0 {
+                        VStack(spacing: 6) {
+                            Circle().frame(width: 3, height: 3)
+                            Circle().frame(width: 3, height: 3)
+                        }
+                        .foregroundStyle(palette.digit.opacity(0.8))
+                        .frame(width: 8)
+                    }
+                    // 两位数字必须在一行：30pt 宽放不下 23pt 圆体粗字，会被折成上下两行
+                    Text(d)
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(palette.digit)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .frame(width: 32)
+                }
+            }
         }
     }
 }
 
 // MARK: - 关于下班啦
 
-/// 关于面板：参考系统「关于本机」——图标 + 名称，中间一段信息列表，底部小字版权
+/// 「关于下班啦」分区：直接显示在设置右侧内容区，不再弹窗
+/// 参考系统「关于本机」：图标 + 名称居中，下面一张信息卡片，底部小字版权
 struct AboutView: View {
     @Environment(\.settingsPalette) private var palette
-    @Environment(\.dismiss) private var dismiss
     /// Info.plist 里的版本号（CFBundleShortVersionString / CFBundleVersion）
     private var version: String {
         let shortVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
@@ -772,13 +1257,16 @@ struct AboutView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .padding(.top, 36)
-            .padding(.bottom, 24)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 24)
+            .padding(.bottom, 28)
 
             VStack(spacing: 0) {
                 aboutRow("版本", version)
                 SettingsDivider()
                 aboutRow("开发者", "沙沙")
+                SettingsDivider()
+                aboutRow("宝贵意见共创人", "PJ")
                 SettingsDivider()
                 HStack(spacing: 12) {
                     Text("项目地址").font(.system(size: 13))
@@ -787,12 +1275,9 @@ struct AboutView: View {
                         .font(.system(size: 13))
                 }
                 .padding(.horizontal, SettingsMetrics.inset)
-                .frame(minHeight: 36)
+                .frame(minHeight: 40)
             }
-            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(palette.card))
-            .padding(.horizontal, 36)
-
-            Spacer(minLength: 20)
+            .background(RoundedRectangle(cornerRadius: SettingsMetrics.cardRadius, style: .continuous).fill(palette.card))
 
             VStack(spacing: 4) {
                 Text("由沙沙制作")
@@ -802,18 +1287,8 @@ struct AboutView: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary.opacity(0.7))
             }
-            .padding(.bottom, 20)
-        }
-        .frame(width: 360, height: 420)
-        .background(palette.window)
-        .overlay(alignment: .topTrailing) {
-            Button(action: { dismiss() }) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 18))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .padding(14)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 20)
         }
     }
 
@@ -824,6 +1299,6 @@ struct AboutView: View {
             Text(value).font(.system(size: 13)).foregroundStyle(.secondary)
         }
         .padding(.horizontal, SettingsMetrics.inset)
-        .frame(minHeight: 36)
+        .frame(minHeight: 40)
     }
 }

@@ -35,7 +35,7 @@ final class ReminderModel: ObservableObject {
 
     // MARK: - 选项
 
-    static let waterIntervals = [15, 30, 45, 60, 90, 120]
+    static let waterIntervals = [5, 10, 15, 30, 45, 60, 90, 120]
     static let eggIntervals = [5, 10, 15, 20, 30, 45, 60, 90, 120]
     /// 触发点过了多久以内仍会补弹（例如正被另一个气泡占着）；超过就跳过，避免启动时补一堆旧提醒
     static let fireWindow: TimeInterval = 120
@@ -44,6 +44,8 @@ final class ReminderModel: ObservableObject {
 
     @Published var waterEnabled: Bool { didSet { save(waterEnabled, Keys.waterEnabled) } }
     @Published var waterIntervalMinutes: Int { didSet { save(waterIntervalMinutes, Keys.waterInterval) } }
+    /// 常驻提醒：喝水动画循环播放，点 × 才关闭；默认开启
+    @Published var waterSticky: Bool { didSet { save(waterSticky, Keys.waterSticky) } }
 
     @Published var eggEnabled: Bool { didSet { save(eggEnabled, Keys.eggEnabled) } }
     @Published var eggIntervalMinutes: Int { didSet { save(eggIntervalMinutes, Keys.eggInterval) } }
@@ -55,13 +57,18 @@ final class ReminderModel: ObservableObject {
 
     // MARK: - 外部依赖
 
-    /// 弹出气泡：返回 false 表示当前忙（已有气泡在播），调度器下一秒再试；force 为预览时强制替换
-    var present: ((URL, Bool) -> Bool)?
+    /// 弹出气泡：返回 false 表示当前忙（已有气泡在播），调度器下一秒再试
+    /// - force：强制替换当前气泡（预览、下班动画顶替常驻喝水）
+    /// - loop：常驻循环播放
+    /// - onDismiss：气泡收回时回调
+    var present: ((_ url: URL, _ force: Bool, _ loop: Bool, _ onDismiss: (() -> Void)?) -> Bool)?
     /// 轮回随机挑一个视频，可替换以便测试
     lazy var videoProvider: (ReminderKind) -> URL? = { [weak self] kind in self?.pickVideo(kind) }
 
     private let work: WorkTimerModel
     private var timer: AnyCancellable?
+    /// 常驻喝水气泡正挂着：期间喝水、彩蛋都不再弹，关闭后从关闭那一刻重新计时
+    private var stickyWaterShowing = false
     /// 间隔计时的起点。存进 UserDefaults，重启 App（更新版本、开机）后接着算，不再从头等
     private var waterAnchor: Date? {
         didSet { saveAnchor(waterAnchor, Keys.waterAnchor) }
@@ -73,6 +80,7 @@ final class ReminderModel: ObservableObject {
     private enum Keys {
         static let waterEnabled = "reminder.water.enabled"
         static let waterInterval = "reminder.water.interval"
+        static let waterSticky = "reminder.water.sticky"
         static let eggEnabled = "reminder.egg.enabled"
         static let eggInterval = "reminder.egg.interval"
         static let offWorkEnabled = "reminder.offWork.enabled"
@@ -87,6 +95,7 @@ final class ReminderModel: ObservableObject {
         let d = UserDefaults.standard
         waterEnabled = d.bool(forKey: Keys.waterEnabled)
         waterIntervalMinutes = d.object(forKey: Keys.waterInterval) as? Int ?? 45
+        waterSticky = d.object(forKey: Keys.waterSticky) as? Bool ?? true
         eggEnabled = d.bool(forKey: Keys.eggEnabled)
         eggIntervalMinutes = d.object(forKey: Keys.eggInterval) as? Int ?? 30
         offWorkEnabled = d.object(forKey: Keys.offWorkEnabled) as? Bool ?? true
@@ -128,7 +137,8 @@ final class ReminderModel: ObservableObject {
     /// 设置面板里的「预览」：立即播放一个，替换正在播的气泡
     func preview(_ kind: ReminderKind) {
         guard let url = videoProvider(kind) else { return }
-        _ = present?(url, true)
+        // 预览只是看看动画内容，不常驻
+        _ = present?(url, true, false, nil)
     }
 
     // MARK: - 调度
@@ -149,9 +159,10 @@ final class ReminderModel: ObservableObject {
             waterAnchor = nil
             return
         }
+        if stickyWaterShowing { return }
         let state = intervalDue(waterAnchor, minutes: waterIntervalMinutes, now: now)
         if state.reset { waterAnchor = now; return }
-        if state.due, fire(.water) { waterAnchor = now }
+        if state.due, fireWater() { waterAnchor = now }
     }
 
     /// 小彩蛋：和喝水一样，上班期间每隔 N 分钟放一个
@@ -160,6 +171,8 @@ final class ReminderModel: ObservableObject {
             eggAnchor = nil
             return
         }
+        // 常驻喝水挂着时跳过，关闭后重新计时
+        if stickyWaterShowing { return }
         let state = intervalDue(eggAnchor, minutes: eggIntervalMinutes, now: now)
         if state.reset { eggAnchor = now; return }
         if state.due, fire(.egg) { eggAnchor = now }
@@ -173,7 +186,8 @@ final class ReminderModel: ObservableObject {
         let key = Self.offWorkKey(for: end)
         guard UserDefaults.standard.string(forKey: Keys.offWorkFiredEnd) != key else { return }
         guard now >= end, now.timeIntervalSince(end) < Self.fireWindow else { return }
-        guard fire(.offWork) else { return }
+        // 常驻喝水挂着时直接顶替，不然下班动画会因为 2 分钟窗口过了而漏播
+        guard fire(.offWork, force: stickyWaterShowing) else { return }
         UserDefaults.standard.set(key, forKey: Keys.offWorkFiredEnd)
     }
 
@@ -182,10 +196,27 @@ final class ReminderModel: ObservableObject {
         String(Int(end.timeIntervalSinceReferenceDate.rounded()))
     }
 
-    private func fire(_ kind: ReminderKind) -> Bool {
+    private func fire(_ kind: ReminderKind, force: Bool = false) -> Bool {
         // 没有视频就当作已提醒，避免每秒重试
         guard let url = videoProvider(kind) else { return true }
-        return present?(url, false) ?? false
+        return present?(url, force, false, nil) ?? false
+    }
+
+    /// 喝水：开了常驻就循环播放，并在关闭时重新计时
+    private func fireWater() -> Bool {
+        guard let url = videoProvider(.water) else { return true }
+        guard waterSticky else { return present?(url, false, false, nil) ?? false }
+        let shown = present?(url, false, true, { [weak self] in self?.stickyWaterClosed() }) ?? false
+        if shown { stickyWaterShowing = true }
+        return shown
+    }
+
+    /// 常驻喝水被关掉（点 × 或被下班动画顶替）：喝水、彩蛋都从这一刻重新计时
+    private func stickyWaterClosed() {
+        stickyWaterShowing = false
+        let now = Date()
+        if waterAnchor != nil { waterAnchor = now }
+        if eggAnchor != nil { eggAnchor = now }
     }
 
     /// 轮回随机：一轮里每个视频都播一次、顺序随机，播完一轮再开下一轮

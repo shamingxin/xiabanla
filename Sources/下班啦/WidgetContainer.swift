@@ -14,10 +14,12 @@ struct WidgetContainer<Content: View>: View {
     @ObservedObject var model: WorkTimerModel
     @ViewBuilder var content: () -> Content
 
-    /// 图片模式下实际能读到的图片；读不到（被删了）时退回黑色
+    /// 图片背景已下线（改为「深浅模式」二态）；保留读取逻辑但强制返回 nil，不再渲染图片
+    /// 如需恢复，把下面一行的 `nil` 换回原判断即可
     private var customImage: NSImage? {
-        guard model.background == .image, let path = model.backgroundImagePath else { return nil }
-        return NSImage(contentsOfFile: path)
+        nil
+        // guard model.background == .image, let path = model.backgroundImagePath else { return nil }
+        // return NSImage(contentsOfFile: path)
     }
 
     private var isLight: Bool { model.background == .light }

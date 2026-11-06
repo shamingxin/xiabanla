@@ -40,7 +40,7 @@ final class BubbleStage: ObservableObject {
     @Published var step = 0
 }
 
-/// 管理提醒气泡：同一时间只显示一个，播放完毕 1 秒后收回
+/// 管理提醒气泡：同一时间只显示一个，播放完毕 1 秒后收回；常驻模式下循环播放，点 × 才收回
 final class BubbleController {
     /// 返回菜单栏图标在屏幕上的位置；图标不可见时返回 nil，气泡退到屏幕右上角
     var anchorProvider: () -> NSRect? = { nil }
@@ -48,29 +48,37 @@ final class BubbleController {
     private var panel: NSPanel?
     private var stage: BubbleStage?
     private var player: AVPlayer?
-    private var observers: [NSObjectProtocol] = []
+    private var observers: [(NotificationCenter, NSObjectProtocol)] = []
     private var pending: [DispatchWorkItem] = []
+    /// 当前气泡收回时（点 ×、播完、被替换）调用一次
+    private var onDismiss: (() -> Void)?
 
     var isShowing: Bool { panel != nil }
 
     /// 弹出气泡并播放视频。已有气泡时：force 为 true 则替换，否则返回 false 让调度器稍后重试
+    /// - loop：常驻模式，同一个视频循环播放，不自动收回
+    /// - onDismiss：这个气泡收回时回调一次
     @discardableResult
-    func show(videoURL: URL, force: Bool = false) -> Bool {
+    func show(videoURL: URL, loop: Bool = false, force: Bool = false, onDismiss: (() -> Void)? = nil) -> Bool {
         if isShowing {
             guard force else { return false }
             dismiss(animated: false)
         }
-        present(videoURL)
+        present(videoURL, loop: loop)
+        self.onDismiss = onDismiss
         return true
     }
 
     func dismiss(animated: Bool = true) {
         pending.forEach { $0.cancel() }
         pending.removeAll()
-        observers.forEach(NotificationCenter.default.removeObserver)
+        observers.forEach { center, token in center.removeObserver(token) }
         observers.removeAll()
         player?.pause()
         player = nil
+        let callback = onDismiss
+        onDismiss = nil
+        callback?()
         guard let panel else { return }
         let stage = self.stage
         self.panel = nil
@@ -91,7 +99,7 @@ final class BubbleController {
 
     // MARK: - 布局与展示
 
-    private func present(_ url: URL) {
+    private func present(_ url: URL, loop: Bool) {
         let size = BubbleMetrics.panelSize
 
         // 大圈尽量居中在图标正下方；靠近屏幕边缘时整体平移，小圈仍从图标处吐出
@@ -135,15 +143,38 @@ final class BubbleController {
         for (delay, action) in timeline { schedule(after: delay, action) }
 
         let center = NotificationCenter.default
-        observers.append(center.addObserver(forName: .AVPlayerItemDidPlayToEndTime,
-                                            object: player.currentItem, queue: .main) { [weak self] _ in
-            self?.schedule(after: BubbleMetrics.lingerAfterEnd) { self?.dismiss() }
-        })
+        observe(center, .AVPlayerItemDidPlayToEndTime, object: player.currentItem) { [weak self, weak player] _ in
+            if loop {
+                // 常驻：同一个视频从头再播，等用户点 ×
+                player?.seek(to: .zero)
+                player?.play()
+            } else {
+                self?.schedule(after: BubbleMetrics.lingerAfterEnd) { self?.dismiss() }
+            }
+        }
         // 文件损坏或无法播放时不要一直挂着
-        observers.append(center.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime,
-                                            object: player.currentItem, queue: .main) { [weak self] _ in
+        observe(center, .AVPlayerItemFailedToPlayToEndTime, object: player.currentItem) { [weak self] _ in
             self?.dismiss()
-        })
+        }
+
+        // 熄屏 / 锁屏时暂停，回来后接着播，气泡留在原处
+        let pause: (Notification) -> Void = { [weak player] _ in player?.pause() }
+        let resume: (Notification) -> Void = { [weak self, weak player] _ in
+            guard let self, self.panel != nil, (self.stage?.step ?? 0) > BubbleMetrics.dots.count else { return }
+            player?.play()
+        }
+        let workspace = NSWorkspace.shared.notificationCenter
+        observe(workspace, NSWorkspace.screensDidSleepNotification, using: pause)
+        observe(workspace, NSWorkspace.screensDidWakeNotification, using: resume)
+        let distributed = DistributedNotificationCenter.default()
+        observe(distributed, Notification.Name("com.apple.screenIsLocked"), using: pause)
+        observe(distributed, Notification.Name("com.apple.screenIsUnlocked"), using: resume)
+    }
+
+    private func observe(_ center: NotificationCenter, _ name: Notification.Name, object: Any? = nil,
+                         using block: @escaping (Notification) -> Void) {
+        let token = center.addObserver(forName: name, object: object, queue: .main, using: block)
+        observers.append((center, token))
     }
 
     private func schedule(after delay: TimeInterval, _ action: @escaping () -> Void) {

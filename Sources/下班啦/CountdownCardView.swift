@@ -94,10 +94,23 @@ struct CountdownCardView: View {
                 }
                 header
             }
-            HStack(spacing: Metrics.tileGap) {
-                FlipTile(value: parts.0, color: digitColor, label: "小时")
-                FlipTile(value: parts.1, color: digitColor, label: "分钟")
-                FlipTile(value: parts.2, color: digitColor, label: "秒")
+            Group {
+                switch model.countdownStyle {
+                case .flip:
+                    HStack(spacing: Metrics.tileGap) {
+                        FlipTile(value: parts.0, color: digitColor, label: "小时")
+                        FlipTile(value: parts.1, color: digitColor, label: "分钟")
+                        FlipTile(value: parts.2, color: digitColor, label: "秒")
+                    }
+                case .dynamicIsland:
+                    HStack(spacing: 0) {
+                        BounceDigitGroup(value: parts.0, color: digitColor, label: "小时")
+                        colonSeparator
+                        BounceDigitGroup(value: parts.1, color: digitColor, label: "分钟")
+                        colonSeparator
+                        BounceDigitGroup(value: parts.2, color: digitColor, label: "秒")
+                    }
+                }
             }
             if model.hasStarted {
                 progressFooter
@@ -119,6 +132,16 @@ struct CountdownCardView: View {
             Divider()
             Button("退出下班啦", action: actions.quit)
         }
+    }
+
+    /// 灵动岛风格两组数字间的圆点分隔符
+    /// 宽度固定等于 Metrics.tileGap，和翻页样式的数字牌间距相同，两种样式总宽度保持一致
+    private var colonSeparator: some View {
+        VStack(spacing: Metrics.tileSize * 0.22) {
+            Circle().fill(digitColor.opacity(0.8)).frame(width: 6, height: 6)
+            Circle().fill(digitColor.opacity(0.8)).frame(width: 6, height: 6)
+        }
+        .frame(width: Metrics.tileGap, height: Metrics.tileSize)
     }
 
     // MARK: - 顶部：状态文字 + 右上角设置
@@ -452,6 +475,42 @@ struct FlipTile: View {
                 previous = current
                 topAngle = 0
                 flipping = false
+            }
+        }
+    }
+}
+
+/// 灵动岛风格数字组：粗体无衬线裸数字，数字变化时果冻式弹跳，不显示时/分/秒标签
+/// 用 spring 动画模拟灵动岛的弹性手感：数字先微微放大上弹，再回落，不做翻页卡片背景
+/// 宽高对齐 Metrics.tileSize，和翻页样式的 FlipTile 保持同样的占位尺寸，切换样式时卡片整体宽度不变
+struct BounceDigitGroup: View {
+    let value: String
+    let color: Color
+    let label: String
+
+    @State private var bounce = false
+
+    var body: some View {
+        Text(value)
+            .font(.system(size: Metrics.digitFontSize * 0.78, weight: .bold, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(color)
+            .scaleEffect(bounce ? 1.12 : 1)
+            .offset(y: bounce ? -4 : 0)
+            .frame(width: Metrics.tileSize, height: Metrics.tileSize, alignment: .center)
+            .onChange(of: value) { _ in bounceOnce() }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(value) \(label)")
+    }
+
+    /// 弹起再回落：弹起快、回落稍慢，接近灵动岛的果冻感
+    private func bounceOnce() {
+        withAnimation(.spring(response: 0.22, dampingFraction: 0.45)) {
+            bounce = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.6)) {
+                bounce = false
             }
         }
     }
