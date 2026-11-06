@@ -12,6 +12,7 @@ struct SettingsView: View {
     /// 顶部 toast 文案，nil 时隐藏
     @State private var toast: String?
     @State private var toastToken = 0
+    @State private var showAbout = false
 
     var body: some View {
         ScrollView {
@@ -32,6 +33,16 @@ struct SettingsView: View {
                     SettingsRow("主题色") {
                         BackgroundPicker(model: model)
                     }
+                    SettingsDivider()
+                    Button(action: { showAbout = true }) {
+                        SettingsRow("关于下班啦") {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .contentShape(Rectangle())
                 }
             }
             .padding(.horizontal, 20)
@@ -42,6 +53,11 @@ struct SettingsView: View {
         .background(SettingsPalette.of(model.background).window)
         .environment(\.settingsPalette, SettingsPalette.of(model.background))
         .environment(\.colorScheme, model.background == .light ? .light : .dark)
+        .sheet(isPresented: $showAbout) {
+            AboutView()
+                .environment(\.settingsPalette, SettingsPalette.of(model.background))
+                .environment(\.colorScheme, model.background == .light ? .light : .dark)
+        }
         .overlay(alignment: .top) {
             if let toast {
                 ToastView(text: toast)
@@ -314,7 +330,8 @@ struct SettingsRow<Trailing: View>: View {
         }
         .padding(.horizontal, SettingsMetrics.inset)
         .padding(.vertical, subtitle == nil ? 0 : 8)
-        .frame(minHeight: 40)
+        .frame(maxWidth: .infinity, minHeight: 40)
+        .contentShape(Rectangle())
     }
 }
 
@@ -723,5 +740,90 @@ struct BackgroundPicker: View {
         } catch {
             return nil
         }
+    }
+}
+
+// MARK: - 关于下班啦
+
+/// 关于面板：参考系统「关于本机」——图标 + 名称，中间一段信息列表，底部小字版权
+struct AboutView: View {
+    @Environment(\.settingsPalette) private var palette
+    @Environment(\.dismiss) private var dismiss
+    /// Info.plist 里的版本号（CFBundleShortVersionString / CFBundleVersion）
+    private var version: String {
+        let shortVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
+        return "版本 \(shortVersion) (\(build))"
+    }
+    private let repoURL = URL(string: "https://github.com/shamingxin/xiabanla")!
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 14) {
+                Image(nsImage: NSImage(named: "AppIcon") ?? NSApp.applicationIconImage)
+                    .resizable()
+                    .frame(width: 96, height: 96)
+
+                VStack(spacing: 4) {
+                    Text("下班啦")
+                        .font(.system(size: 22, weight: .semibold))
+                    Text("这个点，该走了")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.top, 36)
+            .padding(.bottom, 24)
+
+            VStack(spacing: 0) {
+                aboutRow("版本", version)
+                SettingsDivider()
+                aboutRow("开发者", "沙沙")
+                SettingsDivider()
+                HStack(spacing: 12) {
+                    Text("项目地址").font(.system(size: 13))
+                    Spacer(minLength: 8)
+                    Link("GitHub", destination: repoURL)
+                        .font(.system(size: 13))
+                }
+                .padding(.horizontal, SettingsMetrics.inset)
+                .frame(minHeight: 36)
+            }
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(palette.card))
+            .padding(.horizontal, 36)
+
+            Spacer(minLength: 20)
+
+            VStack(spacing: 4) {
+                Text("由沙沙制作")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Text("© 2026 沙沙. 保留所有权利。")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary.opacity(0.7))
+            }
+            .padding(.bottom, 20)
+        }
+        .frame(width: 360, height: 420)
+        .background(palette.window)
+        .overlay(alignment: .topTrailing) {
+            Button(action: { dismiss() }) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 18))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .padding(14)
+        }
+    }
+
+    private func aboutRow(_ label: String, _ value: String) -> some View {
+        HStack(spacing: 12) {
+            Text(label).font(.system(size: 13))
+            Spacer(minLength: 8)
+            Text(value).font(.system(size: 13)).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, SettingsMetrics.inset)
+        .frame(minHeight: 36)
     }
 }

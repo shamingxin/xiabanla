@@ -13,6 +13,7 @@ macOS 菜单栏下班倒计时 App：菜单栏显示剩余时间，点开是翻�
   - 小彩蛋：和喝水一样，上班期间每隔 N 分钟放一个（5 分钟 – 2 小时）
   - 下班提醒：只有开关，倒计时结束那一刻播放一次，当天只播一次
 - **主题色**：黑色 / 白色 / 上传图片。图片清晰显示（80% 不透明 + 30% 黑色遮罩），模糊的是卡片后方的桌面；设置面板跟随黑 / 白切换
+- **关于下班啦**：设置面板「通用」分组里的入口，显示图标、版本号、开发者和 GitHub 链接
 
 ## 视频素材
 
@@ -24,7 +25,9 @@ macOS 菜单栏下班倒计时 App：菜单栏显示剩余时间，点开是翻�
 
 ```sh
 ./build.sh          # 编译打包到 build/下班啦.app（arm64、macOS 13+、ad-hoc 签名）
-ditto -c -k --sequesterRsrc --keepParent build/下班啦.app ~/Desktop/下班啦.zip
+mkdir -p release && ditto -c -k --sequesterRsrc --keepParent build/下班啦.app release/下班啦-v1.3.zip
 ```
 
-发版：改代码 / 加视频 → `build.sh` → 压 zip → 提交推送 main → GitHub 新建 Release 上传 zip。对方首次打开需右键「打开」。
+`release/` 只放最新版本的安装包，已被 git 忽略，不进仓库。
+
+发版：改代码 / 加视频 → 改 build.sh 版本号 → `build.sh` → 压 zip 到 `release/` → 提交推送 main → GitHub 新建 Release 上传 zip。对方首次打开需右键「打开」。

@@ -76,7 +76,8 @@ final class ReminderModel: ObservableObject {
         static let eggEnabled = "reminder.egg.enabled"
         static let eggInterval = "reminder.egg.interval"
         static let offWorkEnabled = "reminder.offWork.enabled"
-        static let offWorkFiredDay = "reminder.offWork.firedDay"
+        /// 记录的是具体下班时刻（而不是日期），改了上班/下班设置算出新的下班时刻后会重新触发一次
+        static let offWorkFiredEnd = "reminder.offWork.firedEnd"
         static let waterAnchor = "reminder.water.anchor"
         static let eggAnchor = "reminder.egg.anchor"
     }
@@ -164,15 +165,21 @@ final class ReminderModel: ObservableObject {
         if state.due, fire(.egg) { eggAnchor = now }
     }
 
-    /// 下班提醒：倒计时结束（跨过下班时间）那一刻播放一次，当天只播一次
+    /// 下班提醒：倒计时结束（跨过下班时间）那一刻播放一次
+    /// 按「具体下班时刻」而不是「日期」记重复，这样中途调整上班/固定时长等设置、算出新的下班时刻后，
+    /// 会被当成一次新的下班时刻，重新播放一次（覆盖「一开始设置误触」导致漏播的情况）
     private func tickOffWork(_ now: Date) {
         guard offWorkEnabled, let end = work.endTime else { return }
-        let day = Self.dayKey(now)
-        let key = "\(day)|offWork"
-        guard UserDefaults.standard.string(forKey: Keys.offWorkFiredDay) != key else { return }
+        let key = Self.offWorkKey(for: end)
+        guard UserDefaults.standard.string(forKey: Keys.offWorkFiredEnd) != key else { return }
         guard now >= end, now.timeIntervalSince(end) < Self.fireWindow else { return }
         guard fire(.offWork) else { return }
-        UserDefaults.standard.set(key, forKey: Keys.offWorkFiredDay)
+        UserDefaults.standard.set(key, forKey: Keys.offWorkFiredEnd)
+    }
+
+    /// 下班时刻的去重 key：精确到秒，避免浮点误差导致同一时刻被判定成两个不同 key
+    private static func offWorkKey(for end: Date) -> String {
+        String(Int(end.timeIntervalSinceReferenceDate.rounded()))
     }
 
     private func fire(_ kind: ReminderKind) -> Bool {

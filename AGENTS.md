@@ -21,8 +21,9 @@ macOS 菜单栏下班倒计时 App（SwiftUI + AppKit），功能说明见 READM
 - 配色走环境值：卡片用 `\.cardPalette`，设置面板用 `\.settingsPalette`，不要写死 `Color.white`
 - UserDefaults key 改名要兼容老用户（如 `defaultStartTime` 沿用）
 - 产品文案以用户定稿为准：设置里叫「主题色」，不叫「背景」
-- 只在用户明确同意后提交；只暂存 Sources/、Assets/ 和文档，推送 main
+- 只在用户明确同意后提交；只暂存 Sources/、Assets/、build.sh、.gitignore 和文档，推送 main；.project-handoff.json、release/ 已被忽略不提交
+- 发版前改 build.sh 里的 CFBundleShortVersionString / CFBundleVersion；安装包打到 `release/下班啦-vX.Y.zip`，只保留最新版
 
 ## 当前状态
 
-v1.1 已发布；v1.2 已定稿（build.sh 版本号 1.2），等提交推送并发 Release，进度见 docs/project-context/CURRENT.md。
+v1.2 已发布（tag v1.2）；v1.3 已提交推送（tag v1.3），GitHub Release 待发布；Release 状态与后续事项见 docs/project-context/CURRENT.md、BACKLOG.md。
