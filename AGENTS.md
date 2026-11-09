@@ -34,4 +34,4 @@ macOS 菜单栏下班倒计时 App（SwiftUI + AppKit），功能说明见 READM
 
 ## 当前状态
 
-v1.4 已发布（2026-11-06，commit 8cda64c）。自动计时 + 到工位缓冲 + 设置窗口可调高度已在工作区完成、未提交、未发版，进度见 docs/project-context/CURRENT.md。
+v1.5 已发布并推送 GitHub（commit 2aedd31）。自动计时、到工位缓冲（已独立于自动计时，自动/手动开始均适用）、设置窗口可调高度均已上线；详细进度和未实测项见 docs/project-context/CURRENT.md。
