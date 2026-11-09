@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import AppKit
 import SwiftUI
+import CoreGraphics
 
 /// 背景样式（深浅模式）：深色 / 浅色
 /// 曾支持「图片」第三态（.image），已下线；枚举保留该 case 仅用于老用户数据迁移兜底，不再对外暴露入口
@@ -67,6 +68,13 @@ final class WorkTimerModel: ObservableObject {
     static let dayCutoffHour = 3
     static let defaultStartText = "10:00"
     static let defaultLatestText = "12:00"
+    /// 自动开始上班：允许比上班区间开始提前多少分钟（早到也能覆盖）
+    static let autoStartLeadMinutes = 60
+    /// 自动开始的默认上班日：周一至周五（Calendar weekday，1 = 周日 … 7 = 周六）
+    static let defaultAutoStartWeekdays: Set<Int> = [2, 3, 4, 5, 6]
+    /// 到工位缓冲：可选分钟数与默认值
+    static let commuteBufferOptions = [1, 3, 5, 10, 15]
+    static let defaultCommuteBufferMinutes = 5
 
     // MARK: - 持久化的设置项
 
@@ -133,6 +141,27 @@ final class WorkTimerModel: ObservableObject {
         didSet { UserDefaults.standard.set(countdownStyle.rawValue, forKey: Keys.countdownStyle) }
     }
 
+    /// 弹性模式下早晨回到电脑前自动开始上班；默认关闭，老用户升级后仍手动开始
+    @Published var autoStartEnabled: Bool {
+        didSet { UserDefaults.standard.set(autoStartEnabled, forKey: Keys.autoStartEnabled) }
+    }
+
+    /// 自动开始的上班日（Calendar weekday），按工作日（凌晨 3 点分界）判断是星期几
+    @Published var autoStartWeekdays: Set<Int> {
+        didSet { UserDefaults.standard.set(autoStartWeekdays.sorted(), forKey: Keys.autoStartWeekdays) }
+    }
+
+    /// 到工位缓冲：自动开始成功时，把上班时间往前回拨一段（楼下打卡到解锁 Mac 的时间）；默认关闭
+    /// 只影响自动开始记录的时间，不参与「是否自动开始」的判断，手动开始/补填不回拨
+    @Published var commuteBufferEnabled: Bool {
+        didSet { UserDefaults.standard.set(commuteBufferEnabled, forKey: Keys.commuteBufferEnabled) }
+    }
+
+    /// 到工位缓冲分钟数，取值见 commuteBufferOptions
+    @Published var commuteBufferMinutes: Int {
+        didSet { UserDefaults.standard.set(commuteBufferMinutes, forKey: Keys.commuteBufferMinutes) }
+    }
+
     // MARK: - 当日状态
 
     /// 今天实际到岗时间，nil 表示今天还没记录
@@ -147,11 +176,16 @@ final class WorkTimerModel: ObservableObject {
     private var lastAlive: Date?
     /// 屏幕是否已熄灭（系统没睡、只是熄屏时计时器还在跑，需要单独判断）
     private var screenAsleep = false
+    /// 自动计时的解锁证据 + 每个工作日一次的检查机会（持久化）
+    private let autoStartGate = AutoStartGate()
+    /// 收到非公开锁屏通知、还没收到解锁通知：视为仍在锁屏（和会话锁定状态双重保护，拿不准就不自动开始）
+    private var lockedByNotification = false
     /// 当前工作日标识，变化时清空当日状态
     private var workdayKey: String
 
     private var timer: AnyCancellable?
     private var observers: [NSObjectProtocol] = []
+    private var distributedObservers: [NSObjectProtocol] = []
 
     private enum Keys {
         static let workMode = "workMode"
@@ -169,6 +203,12 @@ final class WorkTimerModel: ObservableObject {
         static let pausedSeconds = "overtimePausedSeconds"
         static let pausedDay = "overtimePausedDay"
         static let lastAlive = "lastAlive"
+        static let autoStartEnabled = "autoStartEnabled"
+        static let autoStartWeekdays = "autoStartWeekdays"
+        /// 旧版「离开开始时间」，4 小时规则已移除，启动时清掉
+        static let legacyAwayStart = "awayStart"
+        static let commuteBufferEnabled = "autoStartCommuteBufferEnabled"
+        static let commuteBufferMinutes = "autoStartCommuteBufferMinutes"
     }
 
     init() {
@@ -185,6 +225,13 @@ final class WorkTimerModel: ObservableObject {
         self.backgroundImagePath = defaults.string(forKey: Keys.backgroundImagePath)
         self.accentColorHex = defaults.string(forKey: Keys.accentColorHex) ?? AccentPreset.yellow.hex
         self.countdownStyle = CountdownStyle(rawValue: defaults.string(forKey: Keys.countdownStyle) ?? "") ?? .flip
+        self.autoStartEnabled = defaults.bool(forKey: Keys.autoStartEnabled)
+        self.autoStartWeekdays = (defaults.array(forKey: Keys.autoStartWeekdays) as? [Int]).map(Set.init)
+            ?? Self.defaultAutoStartWeekdays
+        self.commuteBufferEnabled = defaults.bool(forKey: Keys.commuteBufferEnabled)
+        let savedBuffer = defaults.integer(forKey: Keys.commuteBufferMinutes)
+        self.commuteBufferMinutes = Self.commuteBufferOptions.contains(savedBuffer)
+            ? savedBuffer : Self.defaultCommuteBufferMinutes
         self.workdayKey = Self.workdayKey(for: Date())
 
         // 老数据里区间可能是反的（旧版没有区间结束），直接恢复默认
@@ -199,6 +246,7 @@ final class WorkTimerModel: ObservableObject {
 
     deinit {
         observers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }
+        distributedObservers.forEach { DistributedNotificationCenter.default().removeObserver($0) }
     }
 
     // MARK: - 设置
@@ -232,9 +280,10 @@ final class WorkTimerModel: ObservableObject {
         return true
     }
 
-    /// 用户点击「开始上班」
+    /// 用户点击「开始上班」；到工位缓冲开启时，往前回拨到到岗时间
     func startWork() {
-        setStartTime(Date())
+        setStartTime(Self.autoStartArrival(at: Date(), bufferEnabled: commuteBufferEnabled,
+                                           bufferMinutes: commuteBufferMinutes))
     }
 
     /// 设置或修改今天的到岗时间（随时可在设置里补填、修改）
@@ -266,6 +315,12 @@ final class WorkTimerModel: ObservableObject {
             pausedSeconds = defaults.double(forKey: Keys.pausedSeconds)
         }
         lastAlive = defaults.object(forKey: Keys.lastAlive) as? Date
+        defaults.removeObject(forKey: Keys.legacyAwayStart)
+        // 登录项在登录后不久拉起 = 用户刚输完密码，算一次有效回到桌面
+        // 手动打开 App（或登录很久后才启动）不算，用户在场可以自己点
+        if Self.launchCountsAsLogin(launchAtLogin: launchAtLogin, loginTime: Self.consoleLoginTime(), now: Date()) {
+            autoStartGate.confirmUnlock()
+        }
         tick(Date())
     }
 
@@ -278,6 +333,7 @@ final class WorkTimerModel: ObservableObject {
             observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 self?.tick(Date())
                 self?.screenAsleep = true
+                self?.autoStartGate.revokeUnlock()
             })
         }
         for name in wakeNames {
@@ -285,6 +341,35 @@ final class WorkTimerModel: ObservableObject {
                 self?.tick(Date())
                 self?.screenAsleep = false
             })
+        }
+
+        // 非公开的锁屏/解锁通知：只用来辅助判断「还在锁屏」，不当作唯一依据
+        let distributed = DistributedNotificationCenter.default()
+        distributedObservers.append(distributed.addObserver(forName: Notification.Name("com.apple.screenIsLocked"),
+                                                            object: nil, queue: .main) { [weak self] _ in
+            self?.lockedByNotification = true
+            self?.autoStartGate.revokeUnlock()
+        })
+        distributedObservers.append(distributed.addObserver(forName: Notification.Name("com.apple.screenIsUnlocked"),
+                                                            object: nil, queue: .main) { [weak self] _ in
+            self?.lockedByNotification = false
+            self?.autoStartGate.confirmUnlock()
+            self?.tick(Date())
+        })
+    }
+
+    /// 有效回到桌面（有解锁证据 + 屏幕亮着且未锁定）时，消耗今天唯一一次检查机会
+    /// 只亮锁屏界面时桌面条件不满足，不会消耗证据和检查机会，等真正解锁再处理
+    private func checkAutoStart(_ date: Date) {
+        guard autoStartGate.unlockConfirmed, !screenAsleep, !lockedByNotification,
+              !Self.sessionIsLocked() else { return }
+        guard autoStartGate.takeCheck(workday: workdayKey,
+                                      active: autoStartEnabled && workMode == .flexible) else { return }
+        if Self.shouldAutoStart(at: date, enabled: autoStartEnabled, mode: workMode,
+                                hasArrived: todayStartTime != nil, weekdays: autoStartWeekdays,
+                                startText: startText, latestText: latestText) {
+            setStartTime(Self.autoStartArrival(at: date, bufferEnabled: commuteBufferEnabled,
+                                               bufferMinutes: commuteBufferMinutes))
         }
     }
 
@@ -301,6 +386,8 @@ final class WorkTimerModel: ObservableObject {
             // 凌晨 3 点：新的一天，清空到岗时间和倒欠计时
             workdayKey = key
             todayStartTime = nil
+            // 跨过凌晨 3 点不算回到桌面：通宵加班的解锁证据作废，要新一天真正解锁/登录才检查
+            autoStartGate.revokeUnlock()
             pausedSeconds = 0
             let defaults = UserDefaults.standard
             defaults.removeObject(forKey: Keys.todayStartTime)
@@ -321,6 +408,7 @@ final class WorkTimerModel: ObservableObject {
         defaults.set(workdayKey, forKey: Keys.pausedDay)
 
         now = date
+        checkAutoStart(date)
     }
 
     // MARK: - 派生状态
@@ -413,6 +501,68 @@ final class WorkTimerModel: ObservableObject {
         return first + " – " + Self.hhmm(ruleLatest.addingTimeInterval(workHours * 3600))
     }
 
+    // MARK: - 自动开始上班
+
+    /// 自动开始上班的判定（纯函数，便于测试），条件全部满足才开始：
+    /// 开关开启、弹性模式、今天还没到岗、今天是上班日、时间在「上班区间开始前 1 小时 ～ 区间结束」内
+    /// 「今天第一次有效回到桌面」由 AutoStartGate 负责，不在这里判断
+    static func shouldAutoStart(at date: Date, enabled: Bool, mode: WorkMode, hasArrived: Bool,
+                                weekdays: Set<Int>, startText: String, latestText: String) -> Bool {
+        guard enabled, mode == .flexible, !hasArrived else { return false }
+        let base = workdayBase(for: date)
+        guard weekdays.contains(Calendar.current.component(.weekday, from: base)) else { return false }
+        let from = time(startText, on: base).addingTimeInterval(-Double(autoStartLeadMinutes) * 60)
+        let to = time(latestText, on: base)
+        return date >= from && date <= to
+    }
+
+    /// 自动开始成功后要记录的到岗时间（纯函数）：缓冲关闭 = 当前时刻；开启 = 当前时刻 − 缓冲分钟数
+    /// 回拨不会越过凌晨 3 点的工作日分界，避免被算到前一天
+    static func autoStartArrival(at date: Date, bufferEnabled: Bool, bufferMinutes: Int) -> Date {
+        guard bufferEnabled, bufferMinutes > 0 else { return date }
+        let dayStart = workdayBase(for: date).addingTimeInterval(Double(dayCutoffHour) * 3600)
+        return max(date.addingTimeInterval(-Double(bufferMinutes) * 60), dayStart)
+    }
+
+    /// 登录后多久内启动 App 才算「登录项拉起」
+    static let loginLaunchWindow: TimeInterval = 5 * 60
+
+    /// 本次启动是否算开机登录：必须开了「登录时打开」，且启动时间在本次控制台登录后 5 分钟内
+    static func launchCountsAsLogin(launchAtLogin: Bool, loginTime: Date?, now: Date) -> Bool {
+        guard launchAtLogin, let loginTime else { return false }
+        let elapsed = now.timeIntervalSince(loginTime)
+        return elapsed >= 0 && elapsed <= loginLaunchWindow
+    }
+
+    /// 当前用户本次在控制台（本机屏幕）登录的时间，读不到返回 nil
+    static func consoleLoginTime() -> Date? {
+        let me = NSUserName()
+        var latest: Date?
+        setutxent()
+        defer { endutxent() }
+        while let ptr = getutxent() {
+            var e = ptr.pointee
+            guard e.ut_type == USER_PROCESS else { continue }
+            let user = withUnsafeBytes(of: &e.ut_user) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+            let line = withUnsafeBytes(of: &e.ut_line) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+            guard user == me, line == "console" else { continue }
+            let t = Date(timeIntervalSince1970: TimeInterval(e.ut_tv.tv_sec))
+            if latest == nil || t > latest! { latest = t }
+        }
+        return latest
+    }
+
+    /// 会话是否可能在锁屏：明确锁定、不在控制台、登录未完成、或读不到会话信息，都按锁定处理
+    /// 注意：未锁屏时系统根本不给 CGSSessionScreenIsLocked 键，所以「没有这个键」不能当成已解锁的证据，
+    /// 解锁证据由 unlockConfirmed 单独提供，这里只负责排除明确的锁定状态
+    static func sessionIsLocked() -> Bool {
+        guard let info = CGSessionCopyCurrentDictionary() as? [String: Any] else { return true }
+        if (info["CGSSessionScreenIsLocked"] as? Bool) == true { return true }
+        guard (info[kCGSessionOnConsoleKey as String] as? Bool) == true else { return true }
+        guard (info[kCGSessionLoginDoneKey as String] as? Bool) == true else { return true }
+        return false
+    }
+
     // MARK: - 工具
 
     /// 十六进制字符串（6 位，不含 #）转 Color；格式不对返回 nil
@@ -464,5 +614,38 @@ final class WorkTimerModel: ObservableObject {
     /// 菜单栏短格式 "H:MM"，不显示秒，避免宽度跳动
     static func compact(_ s: Int) -> String {
         String(format: "%d:%02d", s / 3600, (s % 3600) / 60)
+    }
+}
+
+/// 自动计时的检查机会：每个工作日只在第一次有效回到桌面时检查一次
+/// - 解锁证据：开机登录（登录项拉起）或收到解锁通知时给出；熄屏、睡眠、锁屏、跨过凌晨 3 点时作废
+/// - 检查机会：按工作日标识持久化到 UserDefaults，退出、重启 App 同一天也不会恢复；新工作日自然重置
+/// - 第一次检查时即使太早、太晚、非上班日没开始，也算用掉了
+final class AutoStartGate {
+    static let checkedDayKey = "autoStartCheckedDay"
+    private let defaults: UserDefaults
+    /// 本次是否有「用户已输入密码」的证据，只在内存里，App 重启后要重新拿到
+    private(set) var unlockConfirmed = false
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    func confirmUnlock() { unlockConfirmed = true }
+    func revokeUnlock() { unlockConfirmed = false }
+
+    /// 今天的检查机会是否已经用过
+    func hasChecked(workday: String) -> Bool {
+        defaults.string(forKey: Self.checkedDayKey) == workday
+    }
+
+    /// 在有效回到桌面时调用：消耗解锁证据；功能开启且今天还没检查过时，记下「今天已检查」并返回 true
+    /// active = 自动计时开启且为弹性模式；功能没开时不占用今天的检查机会
+    func takeCheck(workday: String, active: Bool) -> Bool {
+        guard unlockConfirmed else { return false }
+        unlockConfirmed = false
+        guard active, !hasChecked(workday: workday) else { return false }
+        defaults.set(workday, forKey: Self.checkedDayKey)
+        return true
     }
 }

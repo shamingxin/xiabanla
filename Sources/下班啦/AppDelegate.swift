@@ -22,6 +22,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var popover: WidgetPanel?
     private var desktop: WidgetWindow?
     private var settingsWindow: NSWindow?
+    /// 设置窗口代理：拖动时限制高度（NSWindow.delegate 是弱引用，这里强持有）
+    private let settingsResizeDelegate = SettingsResizeDelegate()
     private var cancellables = Set<AnyCancellable>()
     private var monitors: [Any] = []
 
@@ -207,17 +209,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - 设置窗口
 
+    /// 用户拖动后的设置窗口高度
+    private static let settingsHeightKey = "settingsWindowHeight"
+
     @objc func openSettings() {
         closePopover()
         if settingsWindow == nil {
-            // 固定尺寸窗口：不让窗口跟随 SwiftUI 内容尺寸变化，避免布局循环导致崩溃
+            // 窗口尺寸只由窗口决定：hosting view 不向窗口回报内容尺寸，避免窗口跟随 SwiftUI 内容变化造成布局循环崩溃
             let hosting = NSHostingView(rootView: SettingsView(model: model, reminders: reminders))
+            hosting.sizingOptions = []
+            let savedHeight = UserDefaults.standard.double(forKey: Self.settingsHeightKey)
+            let height = savedHeight > 0
+                ? min(max(CGFloat(savedHeight), SettingsMetrics.minWindowHeight), SettingsMetrics.maxWindowHeight)
+                : SettingsMetrics.windowHeight
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0,
                                                       width: SettingsMetrics.windowWidth,
-                                                      height: SettingsMetrics.windowHeight),
-                                  styleMask: [.titled, .closable, .fullSizeContentView],
+                                                      height: height),
+                                  styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
                                   backing: .buffered, defer: false)
             window.contentView = hosting
+            window.delegate = settingsResizeDelegate
+            // 只允许上下拉高度：宽度锁死（「今日工作」面板按 480 内容宽设计）
+            window.contentMinSize = NSSize(width: SettingsMetrics.windowWidth, height: SettingsMetrics.minWindowHeight)
+            window.contentMaxSize = NSSize(width: SettingsMetrics.windowWidth, height: SettingsMetrics.maxWindowHeight)
+            // 自绘圆角窗口的阴影要按新高度重算；松手后记住高度，下次打开沿用
+            let center = NotificationCenter.default
+            center.addObserver(forName: NSWindow.didResizeNotification, object: window, queue: .main) { [weak window] _ in
+                window?.invalidateShadow()
+            }
+            center.addObserver(forName: NSWindow.didEndLiveResizeNotification, object: window, queue: .main) { [weak window] _ in
+                guard let window else { return }
+                // fullSizeContentView：内容视图和窗口等高，直接存内容高度
+                let height = window.contentView?.frame.height ?? window.frame.height
+                UserDefaults.standard.set(Double(height), forKey: Self.settingsHeightKey)
+            }
             window.title = "下班啦设置"
             // 参考系统设置：内容铺到标题栏下面，系统标题隐藏，标题由右侧内容区自己画
             window.titlebarAppearsTransparent = true
@@ -297,5 +322,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         main.addItem(windowItem)
 
         NSApp.mainMenu = main
+    }
+}
+
+/// 设置窗口拖动高度限制
+/// 不能只靠 contentMinSize/contentMaxSize：窗口显示后 SwiftUI 的 NSHostingView 会把它们重置成 0/无限，
+/// 所以在系统询问新尺寸时直接夹住：宽度固定，高度 500–1000
+final class SettingsResizeDelegate: NSObject, NSWindowDelegate {
+    func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
+        NSSize(width: SettingsMetrics.windowWidth,
+               height: min(max(frameSize.height, SettingsMetrics.minWindowHeight), SettingsMetrics.maxWindowHeight))
     }
 }

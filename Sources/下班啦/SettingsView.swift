@@ -155,6 +155,9 @@ struct SettingsView: View {
                                     SettingsSwitch(isOn: $model.launchAtLogin)
                                 }
                             }
+                            // 固定模式按设定时间倒计时，不需要自动开始
+                            if model.workMode == .flexible { autoStartSection }
+                            commuteBufferSection
                         case .appearance:
                             // 页面标题已经是「外观」，卡片上方不再重复小标题
                             SettingsCard {
@@ -189,7 +192,9 @@ struct SettingsView: View {
             }
             .frame(width: SettingsMetrics.contentWidth)
         }
-        .frame(width: SettingsMetrics.windowWidth, height: SettingsMetrics.windowHeight)
+        // 宽度固定；高度跟随窗口（用户可上下拖动），由 AppDelegate 限制最小/最大高度
+        .frame(width: SettingsMetrics.windowWidth)
+        .frame(minHeight: SettingsMetrics.minWindowHeight, maxHeight: .infinity)
         // 窗口外框圆角自己画：用 15.x SDK 编译时系统只给小圆角，和 macOS 26 系统设置对不上
         // 窗口本身是透明的（见 AppDelegate.applySettingsAppearance），可见形状完全由这里决定
         .background(
@@ -282,6 +287,57 @@ struct SettingsView: View {
             }
             SettingsDivider()
             SettingsRow("下班时间") { ValueText(model.ruleEndText) }
+        }
+    }
+
+    // MARK: - 自动开始上班
+
+    /// 一个开关 + 开启后的上班日；开机自动开始依赖「登录时打开」，没开时给一条提示
+    private var autoStartSection: some View {
+        SettingsCard {
+            SettingsRow("自动计时", subtitle: "早晨打开电脑后，自动开始当天的下班倒计时。") {
+                SettingsSwitch(isOn: $model.autoStartEnabled)
+                    .accessibilityLabel("自动计时")
+            }
+            if model.autoStartEnabled {
+                SettingsDivider()
+                SettingsRow("上班日") {
+                    WeekdayPicker(selection: $model.autoStartWeekdays)
+                }
+                if !model.launchAtLogin {
+                    SettingsDivider()
+                    HStack(spacing: 8) {
+                        Text("开机后要自动开始，请先开启「登录时打开」。")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 8)
+                        Button("前往通用") { selectedSection = .general }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.primary)
+                    }
+                    .padding(.horizontal, SettingsMetrics.inset)
+                    .padding(.vertical, 10)
+                }
+            }
+        }
+    }
+
+    /// 独立于自动计时：不管自动开始还是手动点「开始上班」，到岗时间都按此回拨
+    private var commuteBufferSection: some View {
+        SettingsCard {
+            SettingsRow("到工位缓冲", subtitle: "开始上班时，将记录的上班时间提前一段到工位的时间。") {
+                SettingsSwitch(isOn: $model.commuteBufferEnabled)
+                    .accessibilityLabel("到工位缓冲")
+            }
+            if model.commuteBufferEnabled {
+                SettingsDivider()
+                SettingsRow("缓冲时间") {
+                    SettingsPicker("缓冲时间", selection: $model.commuteBufferMinutes,
+                                   options: WorkTimerModel.commuteBufferOptions) { "\($0) 分钟" }
+                }
+            }
         }
     }
 
@@ -724,6 +780,38 @@ struct AccentSwitchStyle: ToggleStyle {
     }
 }
 
+/// 上班日选择：一到日 7 个圆形按钮，选中用主题色实底
+/// selection 存 Calendar weekday（1 = 周日 … 7 = 周六），界面按周一开头排列
+struct WeekdayPicker: View {
+    @Binding var selection: Set<Int>
+    @Environment(\.themeAccent) private var accent
+
+    private static let days: [(weekday: Int, title: String)] =
+        [(2, "一"), (3, "二"), (4, "三"), (5, "四"), (6, "五"), (7, "六"), (1, "日")]
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(Self.days, id: \.weekday) { day in
+                let on = selection.contains(day.weekday)
+                Button {
+                    if on { selection.remove(day.weekday) } else { selection.insert(day.weekday) }
+                } label: {
+                    Text(day.title)
+                        .font(.system(size: 11, weight: on ? .semibold : .regular))
+                        .foregroundStyle(on ? accent.contrastingText : Color.primary.opacity(0.75))
+                        .frame(width: 24, height: 24)
+                        .background(Circle().fill(on ? accent : Color.primary.opacity(0.08)))
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("周" + day.title)
+                .accessibilityValue(on ? "已选" : "未选")
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+        }
+    }
+}
+
 /// 只读数值（自动计算的时间），次级色等宽数字
 struct ValueText: View {
     let text: String
@@ -933,7 +1021,11 @@ enum SettingsMetrics {
     static let contentPadding: CGFloat = 20
     /// 窗口固定尺寸：不随内容自适应，避免布局循环
     static let windowWidth: CGFloat = sidebarInset + sidebarWidth + contentWidth
-    static let windowHeight: CGFloat = 560
+    /// 设置窗口默认高度（首次打开、没有拖动记录时）
+    static let windowHeight: CGFloat = 680
+    /// 用户拖动高度的范围
+    static let minWindowHeight: CGFloat = 500
+    static let maxWindowHeight: CGFloat = 1000
     /// 窗口外框圆角：和侧边栏面板同心（内缩 8 + 面板圆角 20）
     static let windowRadius: CGFloat = sidebarInset + sidebarRadius
 }
