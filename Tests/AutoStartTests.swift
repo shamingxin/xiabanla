@@ -18,6 +18,10 @@ func auto(_ at: Date, enabled: Bool = true, mode: WorkMode = .flexible, arrived:
                                    weekdays: days, startText: "10:00", latestText: "12:00")
 }
 
+print("— 倒计时样式 —")
+check("待机时钟样式可选", CountdownStyle.allCases.contains(.standbyClock), true)
+check("待机时钟持久化值", CountdownStyle.standbyClock.rawValue == "待机时钟", true)
+
 // 2026-11-13 周五，11-14 周六，11-12 周四；上班区间 10:00–12:00
 print("— 判定条件 —")
 check("周五 09:50 → 开始", auto(d(2026,11,13,9,50)), true)

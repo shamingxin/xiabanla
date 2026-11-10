@@ -55,7 +55,7 @@ struct WidgetContainer<Content: View>: View {
         } else {
             ZStack {
                 VisualEffectBackground(cornerRadius: WidgetStyle.cornerRadius)
-                Color.black.opacity(0.5)
+                Color.black.opacity(0.55)
             }
         }
     }

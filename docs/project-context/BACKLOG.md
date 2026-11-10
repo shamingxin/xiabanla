@@ -1,6 +1,6 @@
 ---
 schema_version: 2
-updated_at: "2026-11-09T16:46:00+08:00"
+updated_at: "2026-11-10T10:47:00+08:00"
 ---
 
 # 活跃任务
@@ -18,7 +18,7 @@ updated_at: "2026-11-09T16:46:00+08:00"
 - [ ] v1.0 Release 附件 default.zip 改成可读名称
 - [ ] 视需要：「上班规则」里的「上班时间」与今日面板同名，可改「上班区间」区分
 - [ ] 视需要：支持 Intel Mac（通用二进制）
-- [ ] 视需要：GitHub 发 v1.5 Release，附带 ~/Desktop/下班啦-v1.5.zip
+- [ ] 视需要：GitHub 发 v1.6 Release，附带 ~/Desktop/下班啦-v1.6.zip
 
 ## 阻塞
 

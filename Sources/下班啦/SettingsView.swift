@@ -1316,7 +1316,60 @@ struct CountdownStylePreview: View {
                         .frame(width: 32)
                 }
             }
+        case .standbyClock:
+            HStack(spacing: 0) {
+                standbyDigits("08", groupIndex: 0)
+                standbyColon.zIndex(10)
+                standbyDigits("42", groupIndex: 1)
+                standbyColon.zIndex(10)
+                standbyDigits("16", groupIndex: 2)
+            }
         }
+    }
+
+    /// 待机时钟缩略图：十位深蓝、个位浅蓝，靠负间距形成双色大字，和主卡片的 StandbyDigitGroup 保持同一视觉语言。
+    private func standbyDigits(_ digits: String, groupIndex: Int) -> some View {
+        let characters = Array(digits)
+        let tens = characters.indices.contains(0) ? String(characters[0]) : "–"
+        let ones = characters.indices.contains(1) ? String(characters[1]) : "–"
+        return ZStack {
+            HStack(spacing: -10) {
+                Text(tens)
+                    .font(.system(size: 32, weight: .heavy, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(Color(red: 0.00, green: 0.33, blue: 0.73).opacity(0.86))
+                    .scaleEffect(x: 1.08, y: 1.09)
+                    .rotationEffect(.degrees(previewTilt(at: groupIndex * 2)))
+                Text(ones)
+                    .font(.system(size: 32, weight: .heavy, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(Color(red: 0.34, green: 0.66, blue: 0.94).opacity(0.86))
+                    .scaleEffect(x: 1.08, y: 1.09)
+                    .rotationEffect(.degrees(previewTilt(at: groupIndex * 2 + 1)))
+            }
+        }
+        .lineLimit(1)
+        .fixedSize()
+        .frame(width: 30)
+    }
+
+    private func previewTilt(at position: Int) -> Double {
+        let tilts: [Double] = [4.2, -6.4, 1.3, -2.5, 5.1, -3.6]
+        return tilts[position % tilts.count]
+    }
+
+    private var standbyColon: some View {
+        VStack(spacing: 4) {
+            Circle()
+                .fill(LinearGradient(colors: [.white.opacity(0.96), Color(white: 0.62)],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+                .frame(width: 6, height: 6)
+            Circle()
+                .fill(LinearGradient(colors: [.white.opacity(0.96), Color(white: 0.62)],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+                .frame(width: 6, height: 6)
+        }
+        .frame(width: 12)
     }
 }
 

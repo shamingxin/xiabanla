@@ -110,6 +110,23 @@ struct CountdownCardView: View {
                         colonSeparator
                         BounceDigitGroup(value: parts.2, color: digitColor, label: "秒")
                     }
+                case .standbyClock:
+                    HStack(spacing: 0) {
+                        StandbyDigitGroup(value: parts.0, groupIndex: 0, color: digitColor,
+                                          isOvertime: model.isOffWork, label: "小时")
+                            .zIndex(0)
+                        StandbyColonSeparator(color: digitColor, isOvertime: model.isOffWork)
+                            .zIndex(10)
+                        StandbyDigitGroup(value: parts.1, groupIndex: 1, color: digitColor,
+                                          isOvertime: model.isOffWork, label: "分钟")
+                            .zIndex(0)
+                        StandbyColonSeparator(color: digitColor, isOvertime: model.isOffWork)
+                            .zIndex(10)
+                        StandbyDigitGroup(value: parts.2, groupIndex: 2, color: digitColor,
+                                          isOvertime: model.isOffWork, label: "秒")
+                            .zIndex(0)
+                    }
+                    .offset(y: -7)
                 }
             }
             if model.hasStarted {
@@ -514,4 +531,160 @@ struct BounceDigitGroup: View {
             }
         }
     }
+}
+
+/// 仿 iPhone 待机显示的大数字：每组十位深蓝、个位浅蓝，靠负间距形成宽厚的双色构图。
+/// 只有值变化的短暂过程中才同时显示旧/新值；静止时绝不保留同字阴影。
+struct StandbyDigitGroup: View {
+    let value: String
+    /// 时/分/秒三组分别是 0/1/2，用来给六个视觉位置分配不重复的姿态。
+    let groupIndex: Int
+    let color: Color
+    let isOvertime: Bool
+    let label: String
+
+    @State private var displayedValue: String
+    @State private var outgoingValue: String?
+    @State private var progress: CGFloat
+    @State private var impactScale = CGSize(width: 1, height: 1)
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private static let travel: CGFloat = 17
+
+    init(value: String, groupIndex: Int, color: Color, isOvertime: Bool, label: String) {
+        self.value = value
+        self.groupIndex = groupIndex
+        self.color = color
+        self.isOvertime = isOvertime
+        self.label = label
+        _displayedValue = State(initialValue: value)
+        _progress = State(initialValue: 1)
+    }
+
+    var body: some View {
+        ZStack {
+            if let outgoingValue {
+                digitLayers(outgoingValue, outgoing: true)
+            }
+
+            digitLayers(displayedValue, outgoing: false)
+        }
+        .frame(width: StandbyClockMetrics.pairWidth, height: Metrics.tileSize)
+        // 只在数值更新瞬间做一次短促的压缩—回弹，让秒级变化有「duang」的重量感。
+        .scaleEffect(x: impactScale.width, y: impactScale.height)
+        .onChange(of: value) { transition(to: $0) }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(value) \(label)")
+    }
+
+    private func digitLayers(_ digits: String, outgoing: Bool) -> some View {
+        let amount = outgoing ? progress : 1 - progress
+        // 新值从下方顶上来，旧值向上离开；方向和参考待机钟的数字推进一致。
+        let direction: CGFloat = outgoing ? -1 : 1
+        let y = direction * Self.travel * amount
+        let opacity = outgoing ? 1 - progress : 0.58 + 0.42 * progress
+
+        return pairDigits(digits)
+            .offset(y: y)
+            .opacity(opacity)
+            .animation(.easeOut(duration: 0.40), value: progress)
+    }
+
+    private func pairDigits(_ digits: String) -> some View {
+        let characters = Array(digits)
+        let tens = characters.indices.contains(0) ? String(characters[0]) : "–"
+        let ones = characters.indices.contains(1) ? String(characters[1]) : "–"
+        return HStack(spacing: -24) {
+            displayText(tens, color: tensColor, position: groupIndex * 2)
+            displayText(ones, color: onesColor, position: groupIndex * 2 + 1)
+        }
+    }
+
+    private func displayText(_ digit: String, color: Color, position: Int) -> some View {
+        Text(digit)
+            .font(.system(size: Metrics.digitFontSize * 1.24, weight: .heavy, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(color)
+            .lineLimit(1)
+            .fixedSize()
+            .scaleEffect(x: 1.08, y: 1.09, anchor: .center)
+            // 六个位置允许有不同倾角，但必须共用同一条视觉基线，不能做波浪式上下错位。
+            .rotationEffect(.degrees(tilt(at: position)))
+    }
+
+    /// 六个位置各有固定且不重复的倾角；不依赖数字内容，重复数字也不会摆出相同姿势。
+    private func tilt(at position: Int) -> Double {
+        let tilts: [Double] = [4.2, -6.4, 1.3, -2.5, 5.1, -3.6]
+        return tilts[position % tilts.count]
+    }
+
+    private var tensColor: Color {
+        isOvertime ? color.opacity(0.72) : Color(red: 0.00, green: 0.33, blue: 0.73).opacity(0.86)
+    }
+
+    private var onesColor: Color {
+        isOvertime ? color.opacity(0.90) : Color(red: 0.34, green: 0.66, blue: 0.94).opacity(0.86)
+    }
+
+    private func transition(to newValue: String) {
+        guard newValue != displayedValue else { return }
+        var instant = Transaction()
+        instant.disablesAnimations = true
+        withTransaction(instant) {
+            outgoingValue = displayedValue
+            displayedValue = newValue
+            progress = 0
+        }
+        guard !reduceMotion else {
+            withTransaction(instant) { progress = 1 }
+            return
+        }
+        withAnimation(.easeOut(duration: 0.40)) {
+            progress = 1
+        }
+
+        withAnimation(.easeOut(duration: 0.09)) {
+            impactScale = CGSize(width: 0.94, height: 1.08)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.09) {
+            guard displayedValue == newValue else { return }
+            withAnimation(.interpolatingSpring(stiffness: 360, damping: 20)) {
+                impactScale = CGSize(width: 1, height: 1)
+            }
+        }
+    }
+}
+
+/// 待机时钟的冒号：两个较大的独立圆点使用柔和的白灰渐变，已下班时跟随绿色状态。
+struct StandbyColonSeparator: View {
+    let color: Color
+    let isOvertime: Bool
+
+    var body: some View {
+        VStack(spacing: Metrics.tileSize * 0.18) {
+            dot
+            dot
+        }
+        .frame(width: StandbyClockMetrics.colonWidth, height: Metrics.tileSize)
+        .accessibilityHidden(true)
+    }
+
+    private var dot: some View {
+        Circle()
+            .fill(LinearGradient(colors: dotColors, startPoint: .topLeading, endPoint: .bottomTrailing))
+            .frame(width: 17, height: 17)
+    }
+
+    private var dotColors: [Color] {
+        isOvertime
+            ? [color.opacity(0.98), color.opacity(0.55)]
+            : [Color.white.opacity(0.96), Color(white: 0.62).opacity(0.86)]
+    }
+}
+
+/// 三组总宽度与翻页/灵动岛一致：缩小每一对的布局槽位，把空间让给两个冒号区。
+/// 这样 HH、MM、SS 各自更亲密，而组间仍有清楚的呼吸感。
+private enum StandbyClockMetrics {
+    static let pairWidth: CGFloat = 80
+    static let colonWidth: CGFloat = 24
 }

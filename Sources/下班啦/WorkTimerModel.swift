@@ -43,6 +43,8 @@ enum CountdownStyle: String, CaseIterable, Identifiable, Codable {
     case flip = "翻页"
     /// 仿灵动岛：粗体无衬线裸数字，变化时弹性缩放跳动
     case dynamicIsland = "灵动岛"
+    /// 仿 iPhone 待机显示：深蓝十位与浅蓝个位，变化时自下接位、旧值上移淡出
+    case standbyClock = "待机时钟"
 
     var id: String { rawValue }
 }
