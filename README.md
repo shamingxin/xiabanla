@@ -34,7 +34,7 @@ macOS 菜单栏下班倒计时 App：菜单栏显示剩余时间，点开是翻�
 ```sh
 ./build.sh          # 编译打包到 build/下班啦.app（arm64、macOS 13+、ad-hoc 签名）
 ./Tests/run.sh      # 自动计时判定测试（纯函数，真实锁屏/解锁仍需真机验证）
-mkdir -p release && ditto -c -k --sequesterRsrc --keepParent build/下班啦.app release/下班啦-v1.4.zip
+mkdir -p release && ditto -c -k --sequesterRsrc --keepParent build/下班啦.app release/下班啦-v1.6.zip
 ```
 
 `release/` 只放最新版本的安装包，已被 git 忽略，不进仓库。

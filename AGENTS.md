@@ -11,7 +11,7 @@ macOS 菜单栏下班倒计时 App（SwiftUI + AppKit），功能说明见 READM
 
 ## 目录
 
-- `Sources/下班啦/`：WorkTimerModel（工时规则、倒欠计时、自动计时 shouldAutoStart / AutoStartGate / 到工位缓冲 autoStartArrival、深浅模式、主题色 AccentPreset、倒计时样式 CountdownStyle）、ReminderModel（提醒调度）、BubbleController（思考泡）、CountdownCardView（卡片 + CardPalette + 翻页/灵动岛两种数字样式）、WidgetContainer（背景渲染，图片背景已下线、注释保留）、SettingsView（侧边栏两栏设置面板 + SettingsPalette + themeAccent 环境值 + 自绘强调色开关）、TodayPanel（「今日工作」点阵屏面板 + TodayPalette + 逐位时间输入）、AppDelegate（含设置窗口高度限制 SettingsResizeDelegate）
+- `Sources/下班啦/`：WorkTimerModel（工时规则、倒欠计时、自动计时 shouldAutoStart / AutoStartGate / 到工位缓冲 autoStartArrival、深浅模式、主题色 AccentPreset、倒计时样式 CountdownStyle）、ReminderModel（提醒调度）、BubbleController（思考泡）、CountdownCardView（卡片 + CardPalette + 翻页/灵动岛/待机时钟三种数字样式）、WidgetContainer（背景渲染，图片背景已下线、注释保留）、SettingsView（侧边栏两栏设置面板 + SettingsPalette + themeAccent 环境值 + 自绘强调色开关）、TodayPanel（「今日工作」点阵屏面板 + TodayPalette + 逐位时间输入）、AppDelegate（含设置窗口高度限制 SettingsResizeDelegate）
 - `Tests/`：AutoStartTests.swift + run.sh（无 XCTest，只用 swiftc 编译成可执行文件跑断言）
 - `Assets/Videos/{喝水,彩蛋,下班}/`：内置视频，必须 640×640
 - `docs/project-context/`：跨对话任务接力（CURRENT.md / BACKLOG.md），新对话先读 CURRENT.md 再核对 git
@@ -34,4 +34,4 @@ macOS 菜单栏下班倒计时 App（SwiftUI + AppKit），功能说明见 READM
 
 ## 当前状态
 
-v1.5 已发布并推送 GitHub（commit 2aedd31）。自动计时、到工位缓冲（已独立于自动计时，自动/手动开始均适用）、设置窗口可调高度均已上线；详细进度和未实测项见 docs/project-context/CURRENT.md。
+v1.6 已发布并推送 GitHub（commit d65b242，Release 已公开）。自动计时、到工位缓冲（已独立于自动计时，自动/手动开始均适用）、设置窗口可调高度和待机时钟倒计时样式均已上线；详细进度和未实测项见 docs/project-context/CURRENT.md。
