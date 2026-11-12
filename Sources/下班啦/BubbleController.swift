@@ -10,6 +10,8 @@ enum BubbleMetrics {
     /// 左右留白：放关闭按钮和阴影
     static let sideMargin: CGFloat = 14
     static let bottomMargin: CGFloat = 10
+    /// 只给带回应的喝水提醒向下扩展；云朵与菜单栏的既有定位不变。
+    static let actionAreaHeight: CGFloat = 70
     /// 菜单栏图标到大圈顶部的距离，小圈排在这一段里
     static let trailHeight: CGFloat = 30
     static let lineWidth: CGFloat = 2
@@ -23,9 +25,21 @@ enum BubbleMetrics {
         CGSize(width: cloudWidth + sideMargin * 2, height: trailHeight + cloudHeight + bottomMargin)
     }
 
+    static func panelSize(hasActions: Bool) -> CGSize {
+        CGSize(width: panelSize.width, height: panelSize.height + (hasActions ? actionAreaHeight : 0))
+    }
+
     static var cloudRect: CGRect {
         CGRect(x: sideMargin, y: trailHeight, width: cloudWidth, height: cloudHeight)
     }
+
+}
+
+/// 强制提醒的明确回应。无动作时沿用普通动画的 × / 自动收起行为。
+struct BubbleActions {
+    let primaryTitle: String
+    let secondaryTitle: String
+    let handle: (Bool) -> Void
 }
 
 /// 配色参考用户给的漫画思考泡：白底 + 深石板蓝细线
@@ -59,12 +73,13 @@ final class BubbleController {
     /// - loop：常驻模式，同一个视频循环播放，不自动收回
     /// - onDismiss：这个气泡收回时回调一次
     @discardableResult
-    func show(videoURL: URL, loop: Bool = false, force: Bool = false, onDismiss: (() -> Void)? = nil) -> Bool {
+    func show(videoURL: URL, loop: Bool = false, force: Bool = false, actions: BubbleActions? = nil,
+              onDismiss: (() -> Void)? = nil) -> Bool {
         if isShowing {
             guard force else { return false }
             dismiss(animated: false)
         }
-        present(videoURL, loop: loop)
+        present(videoURL, loop: loop, actions: actions)
         self.onDismiss = onDismiss
         return true
     }
@@ -99,8 +114,8 @@ final class BubbleController {
 
     // MARK: - 布局与展示
 
-    private func present(_ url: URL, loop: Bool) {
-        let size = BubbleMetrics.panelSize
+    private func present(_ url: URL, loop: Bool, actions: BubbleActions?) {
+        let size = BubbleMetrics.panelSize(hasActions: actions != nil)
 
         // 大圈尽量居中在图标正下方；靠近屏幕边缘时整体平移，小圈仍从图标处吐出
         let anchor = anchorProvider()
@@ -111,6 +126,8 @@ final class BubbleController {
         var originX = tipX - size.width / 2
         originX = min(max(originX, visible.minX + 4), visible.maxX - size.width - 4)
         let tipInPanel = min(max(tipX - originX, 8), size.width - 8)
+        // 面板向下加了回应按钮后，也要用完整高度回推原点；这样面板顶部仍贴着原菜单栏锚点，
+        // 云朵不会被额外的面板高度顶到菜单栏里，新增区域只会向下延展。
         let origin = NSPoint(x: originX, y: tipY - size.height)
 
         let player = AVPlayer(url: url)
@@ -121,7 +138,10 @@ final class BubbleController {
 
         let stage = BubbleStage()
         self.stage = stage
-        let view = BubbleView(stage: stage, tipX: tipInPanel, onClose: { [weak self] in self?.dismiss() }) {
+        let view = BubbleView(stage: stage, tipX: tipInPanel, actions: actions, onClose: { [weak self] in self?.dismiss() }, onAction: { [weak self] accepted in
+            actions?.handle(accepted)
+            self?.dismiss()
+        }) {
             PlayerLayerView(player: player)
         }
         let hosting = NSHostingView(rootView: view)
@@ -208,13 +228,15 @@ final class BubblePanel: NSPanel {
 struct BubbleView<Content: View>: View {
     @ObservedObject var stage: BubbleStage
     let tipX: CGFloat
+    let actions: BubbleActions?
     let onClose: () -> Void
+    let onAction: (Bool) -> Void
     @ViewBuilder let content: () -> Content
 
     private static var pop: Animation { .spring(response: 0.3, dampingFraction: 0.6) }
 
     var body: some View {
-        let size = BubbleMetrics.panelSize
+        let size = BubbleMetrics.panelSize(hasActions: actions != nil)
         let cloud = BubbleMetrics.cloudRect
         let trailEnd = CGPoint(x: cloud.midX, y: cloud.minY + 2)
         let cloudShown = stage.step > BubbleMetrics.dots.count
@@ -241,13 +263,23 @@ struct BubbleView<Content: View>: View {
             }
             .frame(width: cloud.width, height: cloud.height)
             .overlay(alignment: .topTrailing) {
-                HandDrawnCloseButton(action: onClose).offset(x: 6, y: 4)
+                if actions == nil { HandDrawnCloseButton(action: onClose).offset(x: 6, y: 4) }
             }
             // 从小圈连接处长出来
             .scaleEffect(cloudShown ? 1 : 0.3, anchor: UnitPoint(x: (trailEnd.x - cloud.minX) / cloud.width, y: 0))
             .opacity(cloudShown ? 1 : 0)
             .animation(Self.pop, value: stage.step)
             .position(x: cloud.midX, y: cloud.midY)
+
+            if let actions, cloudShown {
+                VStack(spacing: 6) {
+                    BubbleActionButton(title: actions.primaryTitle, filled: true) { onAction(true) }
+                    BubbleActionButton(title: actions.secondaryTitle, filled: false) { onAction(false) }
+                }
+                .frame(width: cloud.width - 20, height: BubbleMetrics.actionAreaHeight - 8)
+                .position(x: cloud.midX, y: cloud.maxY + BubbleMetrics.actionAreaHeight / 2)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
         .frame(width: size.width, height: size.height, alignment: .topLeading)
         .environment(\.colorScheme, .light)
@@ -258,6 +290,24 @@ struct BubbleView<Content: View>: View {
         let x = tipX + (end.x - tipX) * t - 4 * sin(t * .pi)
         let y = end.y * t
         return CGPoint(x: x, y: y)
+    }
+}
+
+private struct BubbleActionButton: View {
+    let title: String
+    let filled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title).font(.system(size: filled ? 12 : 11, weight: filled ? .bold : .medium))
+                .foregroundStyle(filled ? BubbleInk.paper : BubbleInk.ink.opacity(0.72))
+                .frame(maxWidth: .infinity).frame(height: filled ? 29 : 25)
+                .background(Capsule().fill(filled ? Color(red: 0.12, green: 0.34, blue: 0.70) : BubbleInk.paper.opacity(0.62)))
+                .overlay(Capsule().stroke(filled ? Color.clear : BubbleInk.ink.opacity(0.45), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
     }
 }
 

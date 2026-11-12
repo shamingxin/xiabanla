@@ -79,7 +79,7 @@ struct CountdownCardView: View {
 
     /// 时、分、秒三段文字
     private var parts: (String, String, String) {
-        if !model.hasStarted { return ("--", "--", "--") }
+        if model.isResting || model.isWaitingForUnlock || !model.hasStarted { return ("--", "--", "--") }
         let s = model.isOffWork ? model.overtimeSeconds : model.remainingSeconds
         return (String(format: "%02d", s / 3600),
                 String(format: "%02d", (s % 3600) / 60),
@@ -129,7 +129,10 @@ struct CountdownCardView: View {
                     .offset(y: -7)
                 }
             }
-            if model.hasStarted {
+            if model.isResting || model.isWaitingForUnlock {
+                Text(model.isWaitingForUnlock ? "休息中，等待下一次有效解锁" : "下一工作日将在凌晨 5:00 开始").font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(palette.faint).frame(maxWidth: .infinity, minHeight: 48)
+            } else if model.hasStarted {
                 progressFooter
             } else {
                 startFooter
@@ -165,7 +168,10 @@ struct CountdownCardView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            if model.isOffWork {
+            if model.isResting || model.isWaitingForUnlock {
+                Image(systemName: "moon.zzz.fill").foregroundStyle(palette.faint)
+                Text(model.isWaitingForUnlock ? "休息中，等待解锁" : "休息中").foregroundStyle(palette.label)
+            } else if model.isOffWork {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(palette.overtime)
                 Text("已下班，公司倒欠你")

@@ -29,9 +29,9 @@ macOS 菜单栏下班倒计时 App（SwiftUI + AppKit），功能说明见 READM
 - 自动计时判定测试：`./Tests/run.sh`（纯函数测试，真实锁屏/解锁时序仍需真机验收）；改自动计时逻辑必须同步更新测试
 - 自动计时安全原则：拿不准就不开始（fail-closed）。解锁证据只来自「登录项在登录后 5 分钟内拉起」或非公开通知 `com.apple.screenIsUnlocked`；未锁屏时系统不给 `CGSSessionScreenIsLocked` 键，「没有这个键」不能当成已解锁；每个工作日只检查一次（`autoStartCheckedDay`），不要恢复已删除的「离开满 4 小时」规则
 - 产品文案：设置里叫「自动计时」「到工位缓冲」「缓冲时间」「上班日」；通用里的开关叫「登录时打开」
-- 只在用户明确同意后提交；只暂存 Sources/、Assets/、Tests/、build.sh、.gitignore 和文档，推送 main；.project-handoff.json、release/ 已被忽略不提交
+- 只在用户明确同意后提交；通常只暂存 Sources/、Assets/、Tests/、build.sh、.gitignore 和文档，推送 main；.project-handoff.json、release/ 默认忽略不提交。只有用户明确要求时，才可强制暂存指定的 release 安装包
 - 发版前改 build.sh 里的 CFBundleShortVersionString / CFBundleVersion；安装包打到 `release/下班啦-vX.Y.zip`，只保留最新版
 
 ## 当前状态
 
-v1.6 已发布并推送 GitHub（commit d65b242，Release 已公开）。自动计时、到工位缓冲（已独立于自动计时，自动/手动开始均适用）、设置窗口可调高度和待机时钟倒计时样式均已上线；详细进度和未实测项见 docs/project-context/CURRENT.md。
+v1.6 已发布并推送 GitHub（commit d65b242，Release 已公开）。v1.7 已完成本地提交，待推送与创建 Release；新增屏幕时间、实际在岗工时、喝水回应与 05:00 工作日边界。详细进度和未实测项见 docs/project-context/CURRENT.md。

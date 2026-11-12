@@ -61,11 +61,12 @@ final class ReminderModel: ObservableObject {
     /// - force：强制替换当前气泡（预览、下班动画顶替常驻喝水）
     /// - loop：常驻循环播放
     /// - onDismiss：气泡收回时回调
-    var present: ((_ url: URL, _ force: Bool, _ loop: Bool, _ onDismiss: (() -> Void)?) -> Bool)?
+    var present: ((_ url: URL, _ force: Bool, _ loop: Bool, _ actions: BubbleActions?, _ onDismiss: (() -> Void)?) -> Bool)?
     /// 轮回随机挑一个视频，可替换以便测试
     lazy var videoProvider: (ReminderKind) -> URL? = { [weak self] kind in self?.pickVideo(kind) }
 
     private let work: WorkTimerModel
+    let activityStore: ActivityStore
     private var timer: AnyCancellable?
     /// 常驻喝水气泡正挂着：期间喝水、彩蛋都不再弹，关闭后从关闭那一刻重新计时
     private var stickyWaterShowing = false
@@ -90,8 +91,9 @@ final class ReminderModel: ObservableObject {
         static let eggAnchor = "reminder.egg.anchor"
     }
 
-    init(work: WorkTimerModel) {
+    init(work: WorkTimerModel, activityStore: ActivityStore = ActivityStore()) {
         self.work = work
+        self.activityStore = activityStore
         let d = UserDefaults.standard
         waterEnabled = d.bool(forKey: Keys.waterEnabled)
         waterIntervalMinutes = d.object(forKey: Keys.waterInterval) as? Int ?? 45
@@ -138,7 +140,7 @@ final class ReminderModel: ObservableObject {
     func preview(_ kind: ReminderKind) {
         guard let url = videoProvider(kind) else { return }
         // 预览只是看看动画内容，不常驻
-        _ = present?(url, true, false, nil)
+        _ = present?(url, true, false, nil, nil)
     }
 
     // MARK: - 调度
@@ -199,16 +201,28 @@ final class ReminderModel: ObservableObject {
     private func fire(_ kind: ReminderKind, force: Bool = false) -> Bool {
         // 没有视频就当作已提醒，避免每秒重试
         guard let url = videoProvider(kind) else { return true }
-        return present?(url, force, false, nil) ?? false
+        return present?(url, force, false, nil, nil) ?? false
     }
 
     /// 喝水：开了常驻就循环播放，并在关闭时重新计时
     private func fireWater() -> Bool {
         guard let url = videoProvider(.water) else { return true }
-        guard waterSticky else { return present?(url, false, false, nil) ?? false }
-        let shown = present?(url, false, true, { [weak self] in self?.stickyWaterClosed() }) ?? false
-        if shown { stickyWaterShowing = true }
+        guard waterSticky else { return present?(url, false, false, nil, nil) ?? false }
+        let actions = BubbleActions(primaryTitle: "我喝啦", secondaryTitle: "还不渴") { [weak self] accepted in
+            self?.respondToWater(accepted ? .completed : .deferred)
+        }
+        let shown = present?(url, false, true, actions, { [weak self] in self?.stickyWaterClosed() }) ?? false
+        if shown {
+            stickyWaterShowing = true
+            activityStore.record(kind: .water, action: .prompted)
+        }
         return shown
+    }
+
+    /// 强制喝水提醒的两个回应都会从当前时刻重新开始下一轮。
+    func respondToWater(_ action: ActivityAction) {
+        guard action == .completed || action == .deferred else { return }
+        activityStore.record(kind: .water, action: action)
     }
 
     /// 常驻喝水被关掉（点 × 或被下班动画顶替）：喝水、彩蛋都从这一刻重新计时

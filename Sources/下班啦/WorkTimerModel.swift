@@ -62,16 +62,15 @@ enum WorkMode: String, CaseIterable, Identifiable {
 
 /// 下班倒计时核心模型
 ///
-/// 一个「工作日」从凌晨 3:00 开始，到次日 3:00 结束：
-/// 半夜加班不会被当成第二天，3:00 自动清空到岗时间和「公司倒欠你」的计时。
+/// 一个「工作日」从凌晨 5:00 开始，到次日 5:00 结束。
 final class WorkTimerModel: ObservableObject {
+    private let activityStore: ActivityStore
 
-    /// 新工作日的分界点（凌晨 3 点）
-    static let dayCutoffHour = 3
+    /// 新工作日的分界点（凌晨 5 点）
+    static let dayCutoffHour = 5
+    static let autoStartEarliestHour = 5
     static let defaultStartText = "10:00"
     static let defaultLatestText = "12:00"
-    /// 自动开始上班：允许比上班区间开始提前多少分钟（早到也能覆盖）
-    static let autoStartLeadMinutes = 60
     /// 自动开始的默认上班日：周一至周五（Calendar weekday，1 = 周日 … 7 = 周六）
     static let defaultAutoStartWeekdays: Set<Int> = [2, 3, 4, 5, 6]
     /// 到工位缓冲：可选分钟数与默认值
@@ -148,7 +147,7 @@ final class WorkTimerModel: ObservableObject {
         didSet { UserDefaults.standard.set(autoStartEnabled, forKey: Keys.autoStartEnabled) }
     }
 
-    /// 自动开始的上班日（Calendar weekday），按工作日（凌晨 3 点分界）判断是星期几
+    /// 自动开始的上班日（Calendar weekday），按工作日（凌晨 5 点分界）判断是星期几
     @Published var autoStartWeekdays: Set<Int> {
         didSet { UserDefaults.standard.set(autoStartWeekdays.sorted(), forKey: Keys.autoStartWeekdays) }
     }
@@ -171,6 +170,8 @@ final class WorkTimerModel: ObservableObject {
 
     /// 当前时间（定时刷新用于驱动倒计时 UI）
     @Published private(set) var now: Date = Date()
+    @Published private(set) var isResting = false
+    @Published private(set) var isWaitingForUnlock = false
 
     /// 下班后不计入「公司倒欠你」的秒数：熄屏、睡眠、关机、App 没运行的时段
     private var pausedSeconds: Double = 0
@@ -182,6 +183,7 @@ final class WorkTimerModel: ObservableObject {
     private let autoStartGate = AutoStartGate()
     /// 收到非公开锁屏通知、还没收到解锁通知：视为仍在锁屏（和会话锁定状态双重保护，拿不准就不自动开始）
     private var lockedByNotification = false
+    private var restingUnlockActive = false
     /// 当前工作日标识，变化时清空当日状态
     private var workdayKey: String
 
@@ -213,7 +215,8 @@ final class WorkTimerModel: ObservableObject {
         static let commuteBufferMinutes = "autoStartCommuteBufferMinutes"
     }
 
-    init() {
+    init(activityStore: ActivityStore = ActivityStore()) {
+        self.activityStore = activityStore
         let defaults = UserDefaults.standard
         self.workMode = WorkMode(rawValue: defaults.string(forKey: Keys.workMode) ?? "") ?? .flexible
         self.workHours = defaults.object(forKey: Keys.workHours) as? Double ?? 9.0
@@ -241,7 +244,11 @@ final class WorkTimerModel: ObservableObject {
             latestText = max(startText, Self.defaultLatestText)
         }
 
+        isResting = activityStore.officePresenceSession(workday: workdayKey)?.endedAt != nil
         restoreTodayState()
+        if let start = todayStartTime {
+            activityStore.recordWorkStart(workday: workdayKey, at: start, plannedSeconds: workHours * 3600)
+        }
         observeScreen()
         startClock()
     }
@@ -295,7 +302,7 @@ final class WorkTimerModel: ObservableObject {
         let c = Calendar.current.dateComponents([.hour, .minute], from: date)
         var start = Calendar.current.date(bySettingHour: c.hour ?? 0, minute: c.minute ?? 0, second: 0,
                                           of: Self.workdayBase(for: current)) ?? date
-        // 0~3 点属于当前工作日的「次日凌晨」
+        // 0~5 点属于当前工作日的「次日凌晨」
         if (c.hour ?? 0) < Self.dayCutoffHour { start = start.addingTimeInterval(24 * 3600) }
         start = min(start, current)
         todayStartTime = start
@@ -303,6 +310,7 @@ final class WorkTimerModel: ObservableObject {
         let defaults = UserDefaults.standard
         defaults.set(start, forKey: Keys.todayStartTime)
         defaults.set(workdayKey, forKey: Keys.todayStartDay)
+        activityStore.recordWorkStart(workday: workdayKey, at: start, plannedSeconds: workHours * 3600)
     }
 
     // MARK: - 计时
@@ -322,6 +330,7 @@ final class WorkTimerModel: ObservableObject {
         // 手动打开 App（或登录很久后才启动）不算，用户在场可以自己点
         if Self.launchCountsAsLogin(launchAtLogin: launchAtLogin, loginTime: Self.consoleLoginTime(), now: Date()) {
             autoStartGate.confirmUnlock()
+            if isResting { restingUnlockActive = true }
         }
         tick(Date())
     }
@@ -333,8 +342,9 @@ final class WorkTimerModel: ObservableObject {
         let wakeNames: [Notification.Name] = [NSWorkspace.screensDidWakeNotification, NSWorkspace.didWakeNotification]
         for name in sleepNames {
             observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                self?.tick(Date())
+                self?.endOfficePresenceIfNeeded(at: Date())
                 self?.screenAsleep = true
+                self?.restingUnlockActive = false
                 self?.autoStartGate.revokeUnlock()
             })
         }
@@ -350,12 +360,14 @@ final class WorkTimerModel: ObservableObject {
         distributedObservers.append(distributed.addObserver(forName: Notification.Name("com.apple.screenIsLocked"),
                                                             object: nil, queue: .main) { [weak self] _ in
             self?.lockedByNotification = true
+            self?.restingUnlockActive = false
             self?.autoStartGate.revokeUnlock()
         })
         distributedObservers.append(distributed.addObserver(forName: Notification.Name("com.apple.screenIsUnlocked"),
                                                             object: nil, queue: .main) { [weak self] _ in
             self?.lockedByNotification = false
             self?.autoStartGate.confirmUnlock()
+            if self?.isResting == true { self?.restingUnlockActive = true }
             self?.tick(Date())
         })
     }
@@ -370,9 +382,21 @@ final class WorkTimerModel: ObservableObject {
         if Self.shouldAutoStart(at: date, enabled: autoStartEnabled, mode: workMode,
                                 hasArrived: todayStartTime != nil, weekdays: autoStartWeekdays,
                                 startText: startText, latestText: latestText) {
+            // 屏幕时间的起点与自动倒计时成功启动是同一次有效解锁；不使用缓冲回拨后的到岗时间。
+            activityStore.recordOfficePresenceStart(workday: workdayKey, at: date)
             setStartTime(Self.autoStartArrival(at: date, bufferEnabled: commuteBufferEnabled,
                                                bufferMinutes: commuteBufferMinutes))
+            isWaitingForUnlock = false
         }
+    }
+
+    /// 关机前、熄屏或系统睡眠时调用；只有已过实际下班时间才把当天在岗记录封存。
+    func endOfficePresenceIfNeeded(at date: Date = Date()) {
+        tick(date)
+        guard Self.shouldEndOfficePresence(at: date, plannedEnd: endTime) else { return }
+        activityStore.recordOfficePresenceEnd(workday: workdayKey, at: date)
+        isResting = true
+        restingUnlockActive = false
     }
 
     /// 每秒刷新一次，驱动倒计时数字和进度条跳动
@@ -385,15 +409,32 @@ final class WorkTimerModel: ObservableObject {
     private func tick(_ date: Date) {
         let key = Self.workdayKey(for: date)
         if key != workdayKey {
-            // 凌晨 3 点：新的一天，清空到岗时间和倒欠计时
+            let boundary = Self.workdayBase(for: date).addingTimeInterval(Double(Self.dayCutoffHour) * 3600)
+            let wasOvertime = !isResting && endTime.map { boundary >= $0 } == true
+            let carry = (wasOvertime || (isResting && restingUnlockActive)) && !screenAsleep && !lockedByNotification
+            if wasOvertime { activityStore.recordOfficePresenceEnd(workday: workdayKey, at: boundary) }
             workdayKey = key
             todayStartTime = nil
-            // 跨过凌晨 3 点不算回到桌面：通宵加班的解锁证据作废，要新一天真正解锁/登录才检查
+            // 跨过凌晨 5 点不算回到桌面：通宵加班的解锁证据作废，要新一天真正解锁/登录才检查
             autoStartGate.revokeUnlock()
             pausedSeconds = 0
             let defaults = UserDefaults.standard
             defaults.removeObject(forKey: Keys.todayStartTime)
             defaults.removeObject(forKey: Keys.todayStartDay)
+            let wasResting = isResting
+            isResting = false
+            restingUnlockActive = false
+            isWaitingForUnlock = Self.shouldWaitForUnlockAfterBoundary(wasResting: wasResting,
+                                                                        carriedIntoNewDay: carry)
+            now = date
+            if carry, Self.shouldAutoStart(at: boundary, enabled: autoStartEnabled, mode: workMode,
+                                           hasArrived: false, weekdays: autoStartWeekdays,
+                                           startText: startText, latestText: latestText) {
+                activityStore.recordOfficePresenceStart(workday: workdayKey, at: boundary)
+                setStartTime(Self.autoStartArrival(at: boundary, bufferEnabled: commuteBufferEnabled,
+                                                   bufferMinutes: commuteBufferMinutes))
+            }
+            return
         }
 
         // 熄屏期间，或两次心跳间隔过长（睡眠、关机、App 未运行），这段时间不计入倒欠
@@ -474,11 +515,19 @@ final class WorkTimerModel: ObservableObject {
         return max(0, elapsed / total)
     }
 
+    /// 截至指定时刻的正常工作秒数；下班后的倒欠时间不计入屏幕时间统计。
+    func workedSeconds(at date: Date = Date()) -> TimeInterval {
+        guard let start = progressStart, let end = endTime else { return 0 }
+        return max(0, min(date, end).timeIntervalSince(start))
+    }
+
     /// 格式化剩余时间为 HH:mm:ss
     var remainingText: String { Self.clock(remainingSeconds) }
 
     /// 菜单栏文案
     var statusText: String {
+        if isWaitingForUnlock { return "休息中，等待解锁" }
+        if isResting { return "休息中" }
         if !hasStarted { return "未开始" }
         if isOffWork { return "已下班，公司倒欠你 " + Self.compact(overtimeSeconds) }
         return "下班倒计时：" + Self.compact(remainingSeconds)
@@ -511,15 +560,34 @@ final class WorkTimerModel: ObservableObject {
     static func shouldAutoStart(at date: Date, enabled: Bool, mode: WorkMode, hasArrived: Bool,
                                 weekdays: Set<Int>, startText: String, latestText: String) -> Bool {
         guard enabled, mode == .flexible, !hasArrived else { return false }
+        return shouldRecordOfficePresence(at: date, weekdays: weekdays,
+                                          startText: startText, latestText: latestText)
+    }
+
+    /// 是否位于上班日及自动开始的时间窗口内。屏幕时间记录复用此资格，
+    /// 但不依赖自动倒计时开关或是否已手动到岗。
+    static func shouldRecordOfficePresence(at date: Date, weekdays: Set<Int>,
+                                           startText: String, latestText: String) -> Bool {
         let base = workdayBase(for: date)
         guard weekdays.contains(Calendar.current.component(.weekday, from: base)) else { return false }
-        let from = time(startText, on: base).addingTimeInterval(-Double(autoStartLeadMinutes) * 60)
+        let from = Calendar.current.date(bySettingHour: autoStartEarliestHour, minute: 0,
+                                           second: 0, of: base)!
         let to = time(latestText, on: base)
         return date >= from && date <= to
     }
 
+    /// 只允许在计划下班后，以第一次离开电脑的时刻封存当天的实际在岗记录。
+    static func shouldEndOfficePresence(at date: Date, plannedEnd: Date?) -> Bool {
+        guard let plannedEnd else { return false }
+        return date >= plannedEnd
+    }
+
+    static func shouldWaitForUnlockAfterBoundary(wasResting: Bool, carriedIntoNewDay: Bool) -> Bool {
+        wasResting && !carriedIntoNewDay
+    }
+
     /// 自动开始成功后要记录的到岗时间（纯函数）：缓冲关闭 = 当前时刻；开启 = 当前时刻 − 缓冲分钟数
-    /// 回拨不会越过凌晨 3 点的工作日分界，避免被算到前一天
+    /// 回拨不会越过凌晨 5 点的工作日分界，避免被算到前一天
     static func autoStartArrival(at date: Date, bufferEnabled: Bool, bufferMinutes: Int) -> Date {
         guard bufferEnabled, bufferMinutes > 0 else { return date }
         let dayStart = workdayBase(for: date).addingTimeInterval(Double(dayCutoffHour) * 3600)
@@ -589,7 +657,7 @@ final class WorkTimerModel: ObservableObject {
         return f
     }()
 
-    /// 工作日的零点：凌晨 3 点前算前一天
+    /// 工作日的零点：凌晨 5 点前算前一天
     static func workdayBase(for date: Date) -> Date {
         Calendar.current.startOfDay(for: date.addingTimeInterval(-Double(dayCutoffHour) * 3600))
     }
@@ -620,7 +688,7 @@ final class WorkTimerModel: ObservableObject {
 }
 
 /// 自动计时的检查机会：每个工作日只在第一次有效回到桌面时检查一次
-/// - 解锁证据：开机登录（登录项拉起）或收到解锁通知时给出；熄屏、睡眠、锁屏、跨过凌晨 3 点时作废
+/// - 解锁证据：开机登录（登录项拉起）或收到解锁通知时给出；熄屏、睡眠、锁屏、跨过凌晨 5 点时作废
 /// - 检查机会：按工作日标识持久化到 UserDefaults，退出、重启 App 同一天也不会恢复；新工作日自然重置
 /// - 第一次检查时即使太早、太晚、非上班日没开始，也算用掉了
 final class AutoStartGate {

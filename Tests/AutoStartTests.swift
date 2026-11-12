@@ -26,9 +26,10 @@ check("待机时钟持久化值", CountdownStyle.standbyClock.rawValue == "待�
 print("— 判定条件 —")
 check("周五 09:50 → 开始", auto(d(2026,11,13,9,50)), true)
 check("周五 10:25 → 开始", auto(d(2026,11,13,10,25)), true)
-check("09:00 窗口起点 → 开始", auto(d(2026,11,13,9,0)), true)
+check("05:00 窗口起点 → 开始", auto(d(2026,11,13,5,0)), true)
+check("04:59 仍属前一工作日 → 不开始", auto(d(2026,11,13,4,59)), false)
 check("12:00 窗口终点 → 开始", auto(d(2026,11,13,12,0)), true)
-check("08:30 太早 → 不开始", auto(d(2026,11,13,8,30)), false)
+check("08:30 已在 05:00 窗口内 → 开始", auto(d(2026,11,13,8,30)), true)
 check("12:10 太晚 → 不开始", auto(d(2026,11,13,12,10)), false)
 check("周四加班到周五 01:00 → 不开始", auto(d(2026,11,13,1,0)), false)
 check("周六未勾选 → 不开始", auto(d(2026,11,14,10,0)), false)
@@ -68,7 +69,7 @@ checkTime("缓冲 5 分钟：09:50 记录 09:45", arrival(d(2026,11,13,9,50), on
 checkTime("缓冲 5 分钟：09:50 下班仍 19:00", offWork(arrival(d(2026,11,13,9,50), on: true), day: 13), d(2026,11,13,19,0))
 checkTime("缓冲 5 分钟：11:58 下班 20:53", offWork(arrival(d(2026,11,13,11,58), on: true), day: 13), d(2026,11,13,20,53))
 checkTime("缓冲 15 分钟：10:25 记录 10:10", arrival(d(2026,11,13,10,25), on: true, 15), d(2026,11,13,10,10))
-checkTime("回拨不越过凌晨 3 点分界", arrival(d(2026,11,13,3,5), on: true, 15), d(2026,11,13,3,0))
+checkTime("回拨不越过凌晨 5 点分界", arrival(d(2026,11,13,5,5), on: true, 15), d(2026,11,13,5,0))
 check("可选值为 1/3/5/10/15，默认 5", WorkTimerModel.commuteBufferOptions == [1,3,5,10,15]
       && WorkTimerModel.defaultCommuteBufferMinutes == 5, true)
 // 缓冲不参与判定：shouldAutoStart 没有缓冲参数，08:30 / 12:10 仍不开始（见上方判定条件用例）
@@ -90,15 +91,31 @@ check("当天再次锁屏再解锁 → 不再检查（太早/太晚也不补触�
 gate = AutoStartGate(defaults: store)
 gate.confirmUnlock()
 check("重启 App 后同一天 → 检查机会不恢复", gate.takeCheck(workday: fri, active: true), false)
-check("凌晨 3 点后新工作日 → 检查机会重置", gate.takeCheck(workday: sat, active: true), false)
+check("新工作日 → 检查机会重置", gate.takeCheck(workday: sat, active: true), false)
 gate.confirmUnlock()
 check("新工作日有效解锁 → 检查", gate.takeCheck(workday: sat, active: true), true)
 let sun = WorkTimerModel.workdayKey(for: d(2026,11,15,10,0))
 gate.confirmUnlock()
 check("自动计时关闭时解锁 → 不检查", gate.takeCheck(workday: sun, active: false), false)
 check("自动计时关闭时不占用当天检查机会", gate.hasChecked(workday: sun), false)
-check("周五 02:59 仍属周四工作日", WorkTimerModel.workdayKey(for: d(2026,11,13,2,59)) == WorkTimerModel.workdayKey(for: d(2026,11,12,10,0)), true)
-check("周五 03:00 起属周五工作日", WorkTimerModel.workdayKey(for: d(2026,11,13,3,0)) == fri, true)
+check("周五 04:59 仍属周四工作日", WorkTimerModel.workdayKey(for: d(2026,11,13,4,59)) == WorkTimerModel.workdayKey(for: d(2026,11,12,10,0)), true)
+check("周五 05:00 起属周五工作日", WorkTimerModel.workdayKey(for: d(2026,11,13,5,0)) == fri, true)
+
+print("— 实际在岗记录 —")
+check("解锁在自动计时窗口内 → 记录在岗起点", WorkTimerModel.shouldRecordOfficePresence(
+    at: d(2026, 11, 13, 9, 0), weekdays: WorkTimerModel.defaultAutoStartWeekdays,
+    startText: "10:00", latestText: "12:00"), true)
+check("解锁早于自动计时窗口 → 不记录在岗起点", WorkTimerModel.shouldRecordOfficePresence(
+    at: d(2026, 11, 13, 4, 30), weekdays: WorkTimerModel.defaultAutoStartWeekdays,
+    startText: "10:00", latestText: "12:00"), false)
+check("下班前熄屏不结束在岗记录", WorkTimerModel.shouldEndOfficePresence(
+    at: d(2026, 11, 13, 19, 20), plannedEnd: d(2026, 11, 13, 19, 21)), false)
+check("下班后熄屏结束在岗记录", WorkTimerModel.shouldEndOfficePresence(
+    at: d(2026, 11, 13, 20, 58), plannedEnd: d(2026, 11, 13, 19, 21)), true)
+check("休息中且未携带解锁证据 → 等待解锁", WorkTimerModel.shouldWaitForUnlockAfterBoundary(
+    wasResting: true, carriedIntoNewDay: false), true)
+check("休息中且持续解锁跨 05:00 → 不等待", WorkTimerModel.shouldWaitForUnlockAfterBoundary(
+    wasResting: true, carriedIntoNewDay: true), false)
 
 print(fails == 0 ? "全部通过" : "失败 \(fails) 项")
 exit(fails == 0 ? 0 : 1)

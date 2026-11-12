@@ -15,8 +15,9 @@ enum XiabanlaMain {
 
 /// 管理菜单栏图标、菜单栏浮层、桌面小窗和设置窗口
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let model = WorkTimerModel()
-    private lazy var reminders = ReminderModel(work: model)
+    private let activityStore = ActivityStore()
+    private lazy var model = WorkTimerModel(activityStore: activityStore)
+    private lazy var reminders = ReminderModel(work: model, activityStore: activityStore)
     private let bubble = BubbleController()
     private var statusItem: NSStatusItem!
     private var popover: WidgetPanel?
@@ -43,8 +44,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupReminders() {
         bubble.anchorProvider = { [weak self] in self?.statusItemScreenFrame() }
-        reminders.present = { [weak self] url, force, loop, onDismiss in
-            self?.bubble.show(videoURL: url, loop: loop, force: force, onDismiss: onDismiss) ?? false
+        reminders.present = { [weak self] url, force, loop, actions, onDismiss in
+            self?.bubble.show(videoURL: url, loop: loop, force: force, actions: actions, onDismiss: onDismiss) ?? false
         }
         reminders.start()
     }
@@ -63,6 +64,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        model.endOfficePresenceIfNeeded()
+    }
 
     // MARK: - 卡片
 

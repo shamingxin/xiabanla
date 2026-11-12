@@ -9,6 +9,7 @@ import UniformTypeIdentifiers
 /// 设置面板侧边栏分区：对应系统设置左侧列表
 enum SettingsSidebarItem: String, CaseIterable, Identifiable {
     case workHours = "工作时长"
+    case screenTime = "屏幕时间"
     case reminderAnimations = "提醒动画"
     case general = "通用"
     case appearance = "外观"
@@ -20,6 +21,7 @@ enum SettingsSidebarItem: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .workHours: return "clock.fill"
+        case .screenTime: return "hourglass"
         case .reminderAnimations: return "bell.fill"
         case .general: return "gearshape.fill"
         case .appearance: return "circle.lefthalf.filled"
@@ -31,6 +33,7 @@ enum SettingsSidebarItem: String, CaseIterable, Identifiable {
     var tint: Color {
         switch self {
         case .workHours: return Color(red: 1.0, green: 0.584, blue: 0.0)      // 橙
+        case .screenTime: return Color(red: 0.38, green: 0.31, blue: 0.95)    // 紫
         case .reminderAnimations: return Color(red: 1.0, green: 0.231, blue: 0.188) // 红
         case .general: return Color(red: 0.557, green: 0.557, blue: 0.576)    // 灰
         case .appearance: return Color(red: 0.11, green: 0.11, blue: 0.118)    // 黑（系统设置「外观」同款）
@@ -121,20 +124,26 @@ extension Color {
 struct SettingsView: View {
     @ObservedObject var model: WorkTimerModel
     @ObservedObject var reminders: ReminderModel
+    @Environment(\.settingsPalette) private var palette
     /// 顶部 toast 文案，nil 时隐藏
     @State private var toast: String?
     @State private var toastToken = 0
     /// 当前选中的侧边栏分区，默认「工作时长」
     @State private var selectedSection: SettingsSidebarItem = .workHours
+    /// 屏幕时间的筛选状态由内容区与日期控制组共享。
+    @StateObject private var screenTimeState = ScreenTimeState()
 
     var body: some View {
         HStack(spacing: 0) {
             SettingsSidebar(selection: $selectedSection)
             VStack(spacing: 0) {
-                // 工具栏行：标题和窗口红黄绿按钮同一水平线，参考系统设置「外观」页顶部
-                Text(selectedSection.rawValue)
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                // 工具栏行：标题和窗口红黄绿按钮同一水平线，参考系统设置「外观」页顶部。
+                // 可交互控件不能放在这个系统标题栏拖拽区域，否则鼠标事件会被窗口拖动手势吞掉。
+                HStack(spacing: 12) {
+                    Text(selectedSection.rawValue)
+                        .font(.system(size: 15, weight: .semibold))
+                    Spacer()
+                }
                     .padding(.horizontal, SettingsMetrics.contentPadding)
                     .frame(height: SettingsMetrics.toolbarHeight)
                     .accessibilityAddTraits(.isHeader)
@@ -145,6 +154,8 @@ struct SettingsView: View {
                         case .workHours:
                             todaySection
                             workSection
+                        case .screenTime:
+                            ScreenTimeView(model: model, state: screenTimeState, activity: reminders.activityStore)
                         case .reminderAnimations:
                             SettingsCard { waterRows }
                             SettingsCard { eggRows }
@@ -353,7 +364,7 @@ struct SettingsView: View {
                                    options: ReminderModel.waterIntervals) { Self.minutesText($0) }
                 }
                 SettingsDivider()
-                SettingsRow("强制提醒", subtitle: "需手动关闭动画") {
+                SettingsRow("强制提醒", subtitle: "弹出后需选择「我喝啦」或「还不渴」。") {
                     SettingsSwitch(isOn: $reminders.waterSticky)
                 }
                 SettingsDivider()
