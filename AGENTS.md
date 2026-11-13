@@ -34,4 +34,4 @@ macOS 菜单栏下班倒计时 App（SwiftUI + AppKit），功能说明见 READM
 
 ## 当前状态
 
-v1.6 已发布并推送 GitHub（commit d65b242，Release 已公开）。v1.8（build 9）已在本地打包，包含在岗时间、同日多段续计与幸福指数；未提交、未推送、未创建 GitHub Release。详细进度和未实测项见 docs/project-context/CURRENT.md。
+v1.8（build 9）已发布：功能提交 `c290633`、安装包提交 `46738fd`、标签 `v1.8` 与 GitHub Release 均已公开；Release 页面直接链接仓库中的 `release/下班啦-v1.8.zip`（网页附件上传曾失败）。幸福指数结果卡现为内置视频封面、手绘半星、分数、称号、统计与人格短评；「再测一次」会重播测量流程且不写入工时数据。详细进度和未实测项见 `docs/project-context/CURRENT.md`。

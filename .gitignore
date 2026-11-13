@@ -8,3 +8,6 @@ release/
 
 # 跨对话接力配置，仅本地使用
 .project-handoff.json
+
+# 本地 UI 需求契约，由协作工具生成，不作为项目文档提交
+.codex/

@@ -98,15 +98,24 @@ struct HappinessIndexView: View {
 
     private func resultView(summary: HappinessScore.WeeklySummary, persona: HappinessPersona) -> some View {
         VStack(spacing: 16) {
-            HappinessResultCard(summary: summary, persona: persona, scheme: scheme)
+            HappinessResultCard(summary: summary, persona: persona)
             HStack(spacing: 10) {
                 Button("再测一次") { reroll(summary: summary, current: persona) }
-                    .buttonStyle(.bordered)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                    .background(Capsule().fill(Color.primary.opacity(scheme == .dark ? 0.18 : 0.10)))
+                    .overlay(Capsule().strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
+                    .buttonStyle(.plain)
                 Button("查看本周在岗", action: showScreenTime)
-                    .buttonStyle(.borderedProminent)
-                    .tint(accent)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(accent.contrastingText)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                    .background(Capsule().fill(accent))
+                    .buttonStyle(.plain)
             }
-            Text("测验只换一句话，不会偷偷篡改你的加班记录。")
+            .frame(maxWidth: 440)
+            Text("重新测量只换一句话，不会偷偷篡改你的加班记录。")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
         }
@@ -126,6 +135,10 @@ struct HappinessIndexView: View {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
         let summary = HappinessScore.weeklySummary(sessions: activity.completedOfficeSessions(from: formatter.string(from: monday), through: formatter.string(from: sunday)))
+        runMeasurement(summary: summary)
+    }
+
+    private func runMeasurement(summary: HappinessScore.WeeklySummary, persona: HappinessPersona? = nil) {
         withAnimation(reduceMotion ? .linear(duration: 0.15) : .spring(duration: 0.35)) { state = .measuring(0) }
         for (step, delay) in [(1, 0.65), (2, 1.3)] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
@@ -136,16 +149,15 @@ struct HappinessIndexView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             guard case .measuring = state else { return }
             withAnimation(reduceMotion ? .linear(duration: 0.2) : .spring(duration: 0.45, bounce: 0.2)) {
-                state = .result(summary, HappinessPersona.allCases.randomElement() ?? .gentle)
+                state = .result(summary, persona ?? HappinessPersona.allCases.randomElement() ?? .gentle)
             }
         }
     }
 
     private func reroll(summary: HappinessScore.WeeklySummary, current: HappinessPersona) {
         let choices = HappinessPersona.allCases.filter { $0 != current }
-        withAnimation(reduceMotion ? .linear(duration: 0.12) : .spring(duration: 0.3, bounce: 0.25)) {
-            state = .result(summary, choices.randomElement() ?? current)
-        }
+        let nextPersona = choices.randomElement() ?? current
+        runMeasurement(summary: summary, persona: nextPersona)
     }
 }
 
@@ -162,79 +174,97 @@ private enum HappinessCopy {
     static let loading = ["正在翻看本周下班记录…", "正在计算被加班偷走的时间…", "正在生成你的幸福小卡…"]
 }
 
+/// 将既有 0–100 的幸福分数转换为只用于展示的半星评级。
+private func starRating(for score: Int) -> Double {
+    (min(100, max(0, Double(score))) / 20 * 2).rounded() / 2
+}
+
 private struct HappinessResultCard: View {
     let summary: HappinessScore.WeeklySummary
     let persona: HappinessPersona
-    let scheme: ColorScheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top) {
-                Text("XIABANLA\nWEEKLY REPORT")
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .foregroundStyle(ink.opacity(0.66))
-                    .tracking(0.5)
-                Spacer()
-                Text("THIS WEEK")
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .tracking(0.7)
-                    .foregroundStyle(ink.opacity(0.56))
-            }
-            .padding(.bottom, 8)
-
             if let score = summary.score {
-                Text("本周幸福指数")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(ink.opacity(0.72))
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("\(score)")
-                        .font(.system(size: 58, weight: .bold, design: .rounded))
-                        .foregroundStyle(ink)
-                        .monospacedDigit()
-                    Text(summary.tier ?? "")
-                        .font(.system(size: 13, weight: .bold))
-                        .padding(.horizontal, 9).padding(.vertical, 5)
-                        .background(Capsule().fill(ink.opacity(0.11)))
-                        .foregroundStyle(ink)
+                HappinessVideoView()
+                    .frame(height: 156)
+                    .background(Color.white.opacity(0.06))
+                    .clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 17, style: .continuous).strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 4) {
+                        ForEach(0..<5, id: \.self) { index in
+                            HandDrawnStar(
+                                fillAmount: starFill(at: index, rating: starRating(for: score)),
+                                tilt: [-0.08, 0.04, -0.03, 0.07, -0.05][index]
+                            )
+                            .frame(width: 27, height: 27)
+                        }
+                    }
+                    .accessibilityLabel("\(starRating(for: score), specifier: "%.1f") 星评分")
+
+                    Text("本周幸福指数")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(ink.opacity(0.70))
+                        .padding(.top, 12)
+                    HStack(alignment: .lastTextBaseline, spacing: 10) {
+                        Text("\(score)")
+                            .font(.system(size: 64, weight: .bold, design: .rounded))
+                            .foregroundStyle(ink)
+                            .monospacedDigit()
+                        Text("分")
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundStyle(ink.opacity(0.74))
+                            .padding(.bottom, 10)
+                        Text(summary.tier ?? "")
+                            .font(.system(size: 13, weight: .semibold))
+                            .padding(.horizontal, 11).padding(.vertical, 6)
+                            .background(Capsule().fill(Color.white.opacity(0.10)))
+                            .foregroundStyle(ink)
+                            .padding(.bottom, 10)
+                    }
+                    .padding(.top, 2)
+                    HStack(spacing: 10) {
+                        HappinessMetric(title: "参与天数", value: "\(summary.days.count) 天", ink: ink)
+                        HappinessMetric(title: "准时下班", value: "\(summary.onTimeDays) 天", ink: ink)
+                        HappinessMetric(title: "加班时间", value: duration(summary.overtimeSeconds), ink: ink)
+                    }
+                    .padding(.top, 14)
+                    Text(personaText)
+                        .font(.system(size: 15, weight: .medium, design: .rounded))
+                        .foregroundStyle(ink.opacity(0.92))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 24)
                 }
-                .padding(.bottom, 11)
-                HStack(spacing: 0) {
-                    HappinessMetric(title: "参与天数", value: "\(summary.days.count) 天", ink: ink)
-                    HappinessMetric(title: "准时下班", value: "\(summary.onTimeDays) 天", ink: ink)
-                    HappinessMetric(title: "加班时间", value: duration(summary.overtimeSeconds), ink: ink)
-                }
-                .padding(.vertical, 12)
-                .overlay(alignment: .top) { Rectangle().fill(ink.opacity(0.16)).frame(height: 1) }
-                .overlay(alignment: .bottom) { Rectangle().fill(ink.opacity(0.16)).frame(height: 1) }
-                Text(personaText)
-                    .font(.system(size: 14, weight: .medium, design: .serif))
-                    .foregroundStyle(ink)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 15)
+                .padding(.top, 16)
             } else {
                 Text("本周还没有\n可测量的幸福记录")
                     .font(.system(size: 27, weight: .bold, design: .rounded))
                     .foregroundStyle(ink)
-                    .padding(.top, 6)
                 Text("等某个工作日下班并封存记录后，再来抽这张卡。")
                     .font(.system(size: 13))
                     .foregroundStyle(ink.opacity(0.72))
                     .padding(.top, 10)
             }
         }
-        .padding(20)
+        .padding(24)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(scheme == .dark ? Color(red: 0.21, green: 0.20, blue: 0.17) : Color(red: 0.96, green: 0.92, blue: 0.82))
+                .fill(Color(red: 0.12, green: 0.13, blue: 0.15))
         )
-        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(ink.opacity(0.22), lineWidth: 1))
-        .shadow(color: .black.opacity(scheme == .dark ? 0.25 : 0.12), radius: 12, y: 6)
+        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
+        .shadow(color: .black.opacity(0.24), radius: 12, y: 6)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(summary.score.map { "本周幸福指数 \($0) 分" } ?? "本周没有可测量的幸福记录")
     }
 
-    private var ink: Color { scheme == .dark ? Color(red: 0.97, green: 0.92, blue: 0.80) : Color(red: 0.13, green: 0.16, blue: 0.19) }
+    private var ink: Color { Color(red: 0.95, green: 0.96, blue: 0.98) }
+    private func starFill(at index: Int, rating: Double) -> CGFloat {
+        min(1, max(0, rating - Double(index)))
+    }
     private var personaText: String {
         switch persona {
         case .gentle: return "准时下班不是偷懒，是把生活还给自己。"
@@ -245,6 +275,50 @@ private struct HappinessResultCard: View {
     private func duration(_ seconds: TimeInterval) -> String {
         let minutes = Int(seconds / 60)
         return minutes == 0 ? "0 分钟" : "\(minutes / 60)小时\(minutes % 60)分"
+    }
+}
+
+/// 模拟手帐卡上的涂鸦星星：不规则轮廓、紫色描边与半填充评分。
+private struct HandDrawnStar: View {
+    let fillAmount: CGFloat
+    let tilt: CGFloat
+
+    private let fill = Color(red: 1.0, green: 0.78, blue: 0.28)
+    private let outline = Color(red: 0.42, green: 0.29, blue: 0.72)
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                SketchStar(tilt: tilt).fill(fill.opacity(0.12))
+                SketchStar(tilt: tilt)
+                    .fill(fill)
+                    .mask(alignment: .leading) {
+                        Rectangle().frame(width: proxy.size.width * fillAmount)
+                    }
+                SketchStar(tilt: tilt).stroke(outline, lineWidth: 2.1)
+            }
+        }
+    }
+}
+
+private struct SketchStar: Shape {
+    let tilt: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let outerRadius = min(rect.width, rect.height) * 0.46
+        let innerRadius = outerRadius * 0.44
+        let wobble: [CGFloat] = [1.0, 0.96, 1.06, 0.91, 0.98, 1.04, 0.94, 1.02, 0.92, 1.0]
+        var path = Path()
+
+        for point in 0..<10 {
+            let radius = (point.isMultiple(of: 2) ? outerRadius : innerRadius) * wobble[point]
+            let angle = -.pi / 2 + CGFloat(point) * .pi / 5 + tilt * (point.isMultiple(of: 2) ? 1 : 0.45)
+            let location = CGPoint(x: center.x + cos(angle) * radius, y: center.y + sin(angle) * radius)
+            point == 0 ? path.move(to: location) : path.addLine(to: location)
+        }
+        path.closeSubpath()
+        return path
     }
 }
 

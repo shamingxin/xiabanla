@@ -26,3 +26,7 @@ cp Tests/HappinessScoreTests.swift "$TMP/main.swift"
 swiftc -target arm64-apple-macos13.0 -vfsoverlay "$TMP/vfs.yaml" -Xcc -ivfsoverlay -Xcc "$TMP/vfs.yaml" \
   "$TMP/main.swift" Sources/下班啦/HappinessScore.swift -o "$TMP/happiness-score-tests"
 "$TMP/happiness-score-tests"
+cp Tests/HappinessResultPresentationTests.swift "$TMP/main.swift"
+swiftc -target arm64-apple-macos13.0 -vfsoverlay "$TMP/vfs.yaml" -Xcc -ivfsoverlay -Xcc "$TMP/vfs.yaml" \
+  "$TMP/main.swift" -o "$TMP/happiness-result-presentation-tests"
+"$TMP/happiness-result-presentation-tests"
