@@ -33,6 +33,14 @@ struct OfficePresenceSession: Equatable {
     let endedAt: Date?
 }
 
+/// 同一工作日的一段实际在岗时间；睡眠/关机间隔由相邻片段的空隙表达，绝不计入工时。
+struct OfficePresenceSegment: Equatable, Identifiable {
+    let id: Int64
+    let workday: String
+    let startedAt: Date
+    let endedAt: Date?
+}
+
 /// 本地行为事件库。数据库不可用时静默降级，提醒本身不应被统计能力阻塞。
 final class ActivityStore {
     private var database: OpaquePointer?
@@ -72,6 +80,24 @@ final class ActivityStore {
         // execute 会静默忽略，因此新旧数据库都能安全打开。
         execute("ALTER TABLE work_sessions ADD COLUMN presence_started_at REAL")
         execute("ALTER TABLE work_sessions ADD COLUMN presence_ended_at REAL")
+        execute("""
+        CREATE TABLE IF NOT EXISTS office_presence_segments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          workday TEXT NOT NULL,
+          started_at REAL NOT NULL,
+          ended_at REAL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS office_presence_segment_start
+          ON office_presence_segments(workday, started_at);
+        CREATE UNIQUE INDEX IF NOT EXISTS office_presence_segment_open
+          ON office_presence_segments(workday) WHERE ended_at IS NULL;
+        """)
+        // 将 v1.7 单段真实在岗记录无损迁入多段表。唯一索引保证多次启动不会重复。
+        execute("""
+        INSERT OR IGNORE INTO office_presence_segments (workday, started_at, ended_at)
+        SELECT workday, presence_started_at, presence_ended_at
+        FROM work_sessions WHERE presence_started_at IS NOT NULL;
+        """)
     }
 
     deinit { sqlite3_close(database) }
@@ -138,6 +164,14 @@ final class ActivityStore {
         sqlite3_step(statement)
     }
 
+    /// 用户主动点「开始上班」时，同时保存倒计时起点和真实到电脑前的时刻。
+    /// 前者可受缓冲回拨影响，后者必须是点击发生的真实时刻，供下班后熄屏时封存实际在岗工时。
+    func recordManualWorkStart(workday: String, countdownStartedAt: Date,
+                               plannedSeconds: TimeInterval, presenceStartedAt: Date) {
+        recordWorkStart(workday: workday, at: countdownStartedAt, plannedSeconds: plannedSeconds)
+        recordOfficePresenceStart(workday: workday, at: presenceStartedAt)
+    }
+
     func workSession(workday: String) -> WorkSession? {
         guard let database else { return nil }
         var statement: OpaquePointer?
@@ -162,6 +196,7 @@ final class ActivityStore {
         sqlite3_bind_double(statement, 2, date.timeIntervalSinceReferenceDate)
         sqlite3_bind_double(statement, 3, date.timeIntervalSinceReferenceDate)
         sqlite3_step(statement)
+        startOfficePresenceSegment(workday: workday, at: date)
     }
 
     /// 仅在已有真实起点且还未结束时写入；熄屏/睡眠可能重复通知，首个时刻即为最终结果。
@@ -174,9 +209,70 @@ final class ActivityStore {
         sqlite3_bind_double(statement, 1, date.timeIntervalSinceReferenceDate)
         sqlite3_bind_text(statement, 2, workday, -1, sqliteTransient)
         sqlite3_step(statement)
+        endOpenOfficePresenceSegment(workday: workday, at: date)
+    }
+
+    /// 开始一段在岗；该工作日已有开放片段时忽略，防止睡醒通知重复创建。
+    func startOfficePresenceSegment(workday: String, at date: Date) {
+        guard let database else { return }
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+        let sql = "INSERT OR IGNORE INTO office_presence_segments (workday, started_at) VALUES (?, ?)"
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else { return }
+        sqlite3_bind_text(statement, 1, workday, -1, sqliteTransient)
+        sqlite3_bind_double(statement, 2, date.timeIntervalSinceReferenceDate)
+        sqlite3_step(statement)
+    }
+
+    /// 封存当前开放片段；重复的睡眠/关机通知不会覆盖第一次离开时刻。
+    func endOpenOfficePresenceSegment(workday: String, at date: Date) {
+        guard let database else { return }
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+        let sql = "UPDATE office_presence_segments SET ended_at = ? WHERE workday = ? AND ended_at IS NULL"
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else { return }
+        sqlite3_bind_double(statement, 1, date.timeIntervalSinceReferenceDate)
+        sqlite3_bind_text(statement, 2, workday, -1, sqliteTransient)
+        sqlite3_step(statement)
+    }
+
+    func officePresenceSegments(workday: String) -> [OfficePresenceSegment] {
+        guard let database else { return [] }
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+        let sql = "SELECT id, started_at, ended_at FROM office_presence_segments WHERE workday = ? ORDER BY started_at ASC, id ASC"
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else { return [] }
+        sqlite3_bind_text(statement, 1, workday, -1, sqliteTransient)
+        var result: [OfficePresenceSegment] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let endedAt: Date? = sqlite3_column_type(statement, 2) == SQLITE_NULL ? nil : Date(timeIntervalSinceReferenceDate: sqlite3_column_double(statement, 2))
+            result.append(OfficePresenceSegment(id: sqlite3_column_int64(statement, 0), workday: workday,
+                                                startedAt: Date(timeIntervalSinceReferenceDate: sqlite3_column_double(statement, 1)), endedAt: endedAt))
+        }
+        return result
+    }
+
+    func hasCompletedOfficePresenceSegment(workday: String) -> Bool {
+        officePresenceSegments(workday: workday).contains { $0.endedAt != nil }
+    }
+
+    func hasOpenOfficePresenceSegment(workday: String) -> Bool {
+        officePresenceSegments(workday: workday).contains { $0.endedAt == nil }
+    }
+
+    func officePresenceSeconds(workday: String, now: Date, includeOpenSegment: Bool) -> TimeInterval {
+        officePresenceSegments(workday: workday).reduce(0) { total, segment in
+            if let endedAt = segment.endedAt { return total + max(0, endedAt.timeIntervalSince(segment.startedAt)) }
+            return includeOpenSegment ? total + max(0, now.timeIntervalSince(segment.startedAt)) : total
+        }
     }
 
     func officePresenceSession(workday: String) -> OfficePresenceSession? {
+        let segments = officePresenceSegments(workday: workday)
+        if let first = segments.first {
+            return OfficePresenceSession(workday: workday, startedAt: first.startedAt,
+                                         endedAt: segments.contains { $0.endedAt == nil } ? nil : segments.last?.endedAt)
+        }
         guard let database else { return nil }
         var statement: OpaquePointer?
         defer { sqlite3_finalize(statement) }
@@ -189,6 +285,44 @@ final class ActivityStore {
         return OfficePresenceSession(workday: workday,
                                      startedAt: Date(timeIntervalSinceReferenceDate: sqlite3_column_double(statement, 0)),
                                      endedAt: endedAt)
+    }
+
+    /// 返回区间内已封存的真实在岗记录，供幸福指数等历史统计使用。
+    /// 未结束的今天、旧版本缺少真实在岗时间的记录都不会被当作完整工作日。
+    func completedOfficeSessions(from firstWorkday: String, through lastWorkday: String) -> [HappinessScore.Session] {
+        guard let database else { return [] }
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+        let sql = """
+        SELECT workday, planned_seconds, presence_started_at, presence_ended_at
+        FROM work_sessions
+        WHERE workday >= ? AND workday <= ?
+        ORDER BY workday ASC
+        """
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else { return [] }
+        sqlite3_bind_text(statement, 1, firstWorkday, -1, sqliteTransient)
+        sqlite3_bind_text(statement, 2, lastWorkday, -1, sqliteTransient)
+        var result: [HappinessScore.Session] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let workdayText = sqlite3_column_text(statement, 0) else { continue }
+            let workday = String(cString: workdayText)
+            let segments = officePresenceSegments(workday: workday)
+            if !segments.isEmpty {
+                guard !segments.contains(where: { $0.endedAt == nil }) else { continue }
+                let seconds = officePresenceSeconds(workday: workday, now: Date(), includeOpenSegment: false)
+                result.append(HappinessScore.Session(workday: workday,
+                                                     plannedSeconds: max(0, sqlite3_column_double(statement, 1)),
+                                                     presenceSeconds: seconds))
+            } else if sqlite3_column_type(statement, 2) != SQLITE_NULL,
+                      sqlite3_column_type(statement, 3) != SQLITE_NULL {
+                let started = sqlite3_column_double(statement, 2)
+                let ended = sqlite3_column_double(statement, 3)
+                result.append(HappinessScore.Session(workday: workday,
+                                                     plannedSeconds: max(0, sqlite3_column_double(statement, 1)),
+                                                     presenceSeconds: max(0, ended - started)))
+            }
+        }
+        return result
     }
 
     private func execute(_ sql: String) {

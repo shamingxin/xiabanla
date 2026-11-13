@@ -9,7 +9,7 @@ enum ScreenTimePeriod: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-/// 屏幕时间展示规则与 SwiftUI 视图分离，保证实际在岗记录的优先级可独立测试。
+/// 在岗时间展示规则与 SwiftUI 视图分离，保证实际在岗记录的优先级可独立测试。
 enum ScreenTimeDuration {
     static func seconds(for presence: OfficePresenceSession?, plannedSeconds: TimeInterval,
                         now: Date, isCurrentWorkday: Bool, fallbackStartedAt: Date? = nil) -> TimeInterval {

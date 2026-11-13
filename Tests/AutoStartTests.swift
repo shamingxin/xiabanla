@@ -112,6 +112,16 @@ check("下班前熄屏不结束在岗记录", WorkTimerModel.shouldEndOfficePres
     at: d(2026, 11, 13, 19, 20), plannedEnd: d(2026, 11, 13, 19, 21)), false)
 check("下班后熄屏结束在岗记录", WorkTimerModel.shouldEndOfficePresence(
     at: d(2026, 11, 13, 20, 58), plannedEnd: d(2026, 11, 13, 19, 21)), true)
+check("下班后已封存再解锁 → 续开加班片段", WorkTimerModel.shouldResumeOfficePresence(
+    at: d(2026, 11, 13, 20, 30), plannedEnd: d(2026, 11, 13, 19, 21), hasCompletedSegment: true), true)
+check("下班前解锁不新开加班片段", WorkTimerModel.shouldResumeOfficePresence(
+    at: d(2026, 11, 13, 18, 30), plannedEnd: d(2026, 11, 13, 19, 21), hasCompletedSegment: true), false)
+check("没有已封存片段不续开", WorkTimerModel.shouldResumeOfficePresence(
+    at: d(2026, 11, 13, 20, 30), plannedEnd: d(2026, 11, 13, 19, 21), hasCompletedSegment: false), false)
+check("异常关机后以上次心跳封存开放片段", WorkTimerModel.shouldRecoverOpenOfficePresence(
+    lastAlive: d(2026, 11, 13, 20, 58), plannedEnd: d(2026, 11, 13, 19, 21)), true)
+check("下班前异常退出不封存开放片段", WorkTimerModel.shouldRecoverOpenOfficePresence(
+    lastAlive: d(2026, 11, 13, 18, 58), plannedEnd: d(2026, 11, 13, 19, 21)), false)
 check("休息中且未携带解锁证据 → 等待解锁", WorkTimerModel.shouldWaitForUnlockAfterBoundary(
     wasResting: true, carriedIntoNewDay: false), true)
 check("休息中且持续解锁跨 05:00 → 不等待", WorkTimerModel.shouldWaitForUnlockAfterBoundary(

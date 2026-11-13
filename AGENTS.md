@@ -19,7 +19,7 @@ macOS 菜单栏下班倒计时 App（SwiftUI + AppKit），功能说明见 READM
 ## 约定
 
 - 设置窗口两栏布局，宽度固定 678，高度可上下拖动 500–1000、默认 680、松手后记住（`settingsWindowHeight`）；高度限制必须放在 `SettingsResizeDelegate.windowWillResize`，`contentMinSize/contentMaxSize` 在窗口显示后会被 NSHostingView 清零（侧边栏浮起面板内缩 8 + 宽 190，右内容区 480 宽，尺寸常量在 `SettingsMetrics`），hosting 的 `sizingOptions = []`，不要改成随内容自适应（会布局循环闪退）；窗口 fullSizeContentView + 空 unified 工具栏，红黄绿按钮落在侧边栏面板内，右侧顶部 15pt 半粗标题和按钮同一行
-- 设置面板分五个侧边栏分区：「工作时长」（今日工作+上班规则，默认选中）、「提醒动画」（喝水/彩蛋/下班提醒）、「通用」（登录项）、「外观」（深浅模式 + 主题色一张卡片；下方「倒计时样式」独立成组，墙纸式 3 列预览网格 `CountdownStylePreview`，新增样式加枚举项 + 补预览画法即可）、「关于」（直接在内容区显示，不弹窗）；侧边栏每项是彩色圆角方块图标（分类色固定），选中态主题色实底，文字黑/白按底色亮度自动取（`Color.contrastingText`）
+- 设置面板分七个侧边栏分区：「工作时长」（今日工作+上班规则，默认选中）、「在岗时间」（公司电脑上的实际在岗片段）、「幸福指数」、「提醒动画」（喝水/彩蛋/下班提醒）、「通用」（登录项）、「外观」（深浅模式 + 主题色一张卡片；下方「倒计时样式」独立成组，墙纸式 3 列预览网格 `CountdownStylePreview`，新增样式加枚举项 + 补预览画法即可）、「关于」（直接在内容区显示，不弹窗）；侧边栏每项是彩色圆角方块图标（分类色固定），选中态主题色实底，文字黑/白按底色亮度自动取（`Color.contrastingText`）
 - 配色走环境值：卡片用 `\.cardPalette`，设置面板用 `\.settingsPalette`，强调色用 `\.themeAccent`（在 SettingsView 根部由 `model.accentColor` 注入），不要写死 `Color.white` 或写死十六进制强调色
 - UserDefaults key 改名要兼容老用户（如 `defaultStartTime` 沿用）
 - **产品文案（2026-11 改版后）**：原「主题色」（黑/白/图片背景）现在叫「深浅模式」，只剩「浅色」「深色」两态，样式是系统设置「外观」同款窗口缩略图（`AppearanceThumbnail`）+ 下方文字，选中态主题色描边，上传图片功能已下线（代码保留注释，未删除，见 `WidgetContainer.customImage`）；新增「主题色」控制开关/数字等强调色（5 预设：荧光绿 #39FF14、莱茵蓝 #0057FF、黄 #FED501、粉 #FF6B9D、红 #FF3B30 + 自定义 hex 输入）；新增「倒计时样式」控制主卡片数字呈现（翻页 `flip` 现状 / 灵动岛 `dynamicIsland` 粗体数字+spring 果冻动画），只影响 CountdownCardView，不影响「今日工作」点阵面板
@@ -34,4 +34,4 @@ macOS 菜单栏下班倒计时 App（SwiftUI + AppKit），功能说明见 READM
 
 ## 当前状态
 
-v1.6 已发布并推送 GitHub（commit d65b242，Release 已公开）。v1.7 已完成本地提交，待推送与创建 Release；新增屏幕时间、实际在岗工时、喝水回应与 05:00 工作日边界。详细进度和未实测项见 docs/project-context/CURRENT.md。
+v1.6 已发布并推送 GitHub（commit d65b242，Release 已公开）。v1.8（build 9）已在本地打包，包含在岗时间、同日多段续计与幸福指数；未提交、未推送、未创建 GitHub Release。详细进度和未实测项见 docs/project-context/CURRENT.md。

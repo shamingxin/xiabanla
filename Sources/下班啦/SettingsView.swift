@@ -9,7 +9,8 @@ import UniformTypeIdentifiers
 /// 设置面板侧边栏分区：对应系统设置左侧列表
 enum SettingsSidebarItem: String, CaseIterable, Identifiable {
     case workHours = "工作时长"
-    case screenTime = "屏幕时间"
+    case screenTime = "在岗时间"
+    case happinessIndex = "幸福指数"
     case reminderAnimations = "提醒动画"
     case general = "通用"
     case appearance = "外观"
@@ -22,6 +23,7 @@ enum SettingsSidebarItem: String, CaseIterable, Identifiable {
         switch self {
         case .workHours: return "clock.fill"
         case .screenTime: return "hourglass"
+        case .happinessIndex: return "face.smiling.fill"
         case .reminderAnimations: return "bell.fill"
         case .general: return "gearshape.fill"
         case .appearance: return "circle.lefthalf.filled"
@@ -34,6 +36,7 @@ enum SettingsSidebarItem: String, CaseIterable, Identifiable {
         switch self {
         case .workHours: return Color(red: 1.0, green: 0.584, blue: 0.0)      // 橙
         case .screenTime: return Color(red: 0.38, green: 0.31, blue: 0.95)    // 紫
+        case .happinessIndex: return Color(red: 1.0, green: 0.64, blue: 0.0)  // 暖黄
         case .reminderAnimations: return Color(red: 1.0, green: 0.231, blue: 0.188) // 红
         case .general: return Color(red: 0.557, green: 0.557, blue: 0.576)    // 灰
         case .appearance: return Color(red: 0.11, green: 0.11, blue: 0.118)    // 黑（系统设置「外观」同款）
@@ -130,7 +133,7 @@ struct SettingsView: View {
     @State private var toastToken = 0
     /// 当前选中的侧边栏分区，默认「工作时长」
     @State private var selectedSection: SettingsSidebarItem = .workHours
-    /// 屏幕时间的筛选状态由内容区与日期控制组共享。
+    /// 在岗时间的筛选状态由内容区与日期控制组共享。
     @StateObject private var screenTimeState = ScreenTimeState()
 
     var body: some View {
@@ -156,6 +159,10 @@ struct SettingsView: View {
                             workSection
                         case .screenTime:
                             ScreenTimeView(model: model, state: screenTimeState, activity: reminders.activityStore)
+                        case .happinessIndex:
+                            HappinessIndexView(activity: reminders.activityStore) {
+                                selectedSection = .screenTime
+                            }
                         case .reminderAnimations:
                             SettingsCard { waterRows }
                             SettingsCard { eggRows }

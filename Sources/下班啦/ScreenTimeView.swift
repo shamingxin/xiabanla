@@ -33,11 +33,11 @@ struct ScreenTimeView: View {
                     }
                 }
                 if period == .week {
-                    Text("每天的工作时长").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text("每天的在岗时间").font(.system(size: 11)).foregroundStyle(.secondary)
                     WorkWeekChart(values: weekValues, average: weekAverage, accent: accent).frame(height: 122).padding(.top, 5)
                 }
                 HStack {
-                    Text(period == .day ? "当天累计" : "本周平均").font(.system(size: 12)).foregroundStyle(.secondary)
+                    Text(period == .day ? "当天在岗" : "本周平均在岗").font(.system(size: 12)).foregroundStyle(.secondary)
                     Spacer()
                     Text(duration(period == .day ? primarySeconds : weekAverage)).font(.system(size: 13, weight: .semibold, design: .rounded)).monospacedDigit()
                 }.padding(.top, 4)
@@ -58,7 +58,7 @@ struct ScreenTimeView: View {
     private var period: Period { state.period }
     private var selectedDate: Date { state.selectedDate }
     private var selectedDay: Date { calendar.startOfDay(for: selectedDate) }
-    private var primaryTitle: String { period == .day ? (calendar.isDateInToday(selectedDay) ? "今天的工作时长" : "\(selectedDay.formatted(.dateTime.month().day())) 的工作时长") : "本周累计工作时长" }
+    private var primaryTitle: String { period == .day ? (calendar.isDateInToday(selectedDay) ? "今天的在岗时间" : "\(selectedDay.formatted(.dateTime.month().day())) 的在岗时间") : "本周累计在岗时间" }
     private var primarySeconds: TimeInterval { period == .day ? workSeconds(on: selectedDay) : weekValues.reduce(0, +) }
     private var compareTitle: String { period == .day ? "与昨天比" : "与上周比" }
     private var compareReference: TimeInterval {
@@ -97,6 +97,11 @@ struct ScreenTimeView: View {
         guard day <= todayStart else { return 0 }
         guard let session = session(on: day) else { return 0 }
         let key = workdayKey(forCalendarDay: day)
+        let segments = activity.officePresenceSegments(workday: key)
+        if !segments.isEmpty {
+            return activity.officePresenceSeconds(workday: key, now: model.now,
+                                                  includeOpenSegment: key == WorkTimerModel.workdayKey(for: model.now))
+        }
         return ScreenTimeDuration.seconds(for: activity.officePresenceSession(workday: key),
                                           plannedSeconds: session.plannedSeconds,
                                           now: model.now,
@@ -233,7 +238,7 @@ private struct WorkWeekChart: View {
                     .offset(y: averageY - geo.size.height / 2)
             }
         }
-    }.accessibilityLabel("本周每天工作时长") }
+    }.accessibilityLabel("本周每天在岗时间") }
 
     private func duration(_ seconds: TimeInterval) -> String {
         "\(Int(seconds / 3600)) 小时"

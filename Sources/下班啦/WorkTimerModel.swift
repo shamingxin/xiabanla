@@ -244,10 +244,27 @@ final class WorkTimerModel: ObservableObject {
             latestText = max(startText, Self.defaultLatestText)
         }
 
-        isResting = activityStore.officePresenceSession(workday: workdayKey)?.endedAt != nil
         restoreTodayState()
         if let start = todayStartTime {
             activityStore.recordWorkStart(workday: workdayKey, at: start, plannedSeconds: workHours * 3600)
+        }
+        // 非正常关机/强制结束时来不及收到睡眠或退出通知：下次启动用最后一次心跳封存。
+        // 只在已过计划下班时处理，不能把下班前的异常退出伪造成“已下班”。
+        if activityStore.hasOpenOfficePresenceSegment(workday: workdayKey),
+           let lastAlive,
+           Self.shouldRecoverOpenOfficePresence(lastAlive: lastAlive, plannedEnd: endTime) {
+            activityStore.endOpenOfficePresenceSegment(workday: workdayKey, at: lastAlive)
+        }
+        isResting = activityStore.hasCompletedOfficePresenceSegment(workday: workdayKey)
+            && !activityStore.hasOpenOfficePresenceSegment(workday: workdayKey)
+        // 这台 App 只在公司电脑使用：下班后已封存、同一工作日再次启动 App，
+        // 就表示用户回到公司继续加班。新片段从本次启动开始，绝不把关机间隔算进去。
+        let launchedAt = Date()
+        if isResting,
+           Self.shouldResumeOfficePresence(at: launchedAt, plannedEnd: endTime,
+                                           hasCompletedSegment: activityStore.hasCompletedOfficePresenceSegment(workday: workdayKey)) {
+            activityStore.startOfficePresenceSegment(workday: workdayKey, at: launchedAt)
+            isResting = false
         }
         observeScreen()
         startClock()
@@ -291,13 +308,15 @@ final class WorkTimerModel: ObservableObject {
 
     /// 用户点击「开始上班」；到工位缓冲开启时，往前回拨到到岗时间
     func startWork() {
-        setStartTime(Self.autoStartArrival(at: Date(), bufferEnabled: commuteBufferEnabled,
-                                           bufferMinutes: commuteBufferMinutes))
+        let clickedAt = Date()
+        setStartTime(Self.autoStartArrival(at: clickedAt, bufferEnabled: commuteBufferEnabled,
+                                           bufferMinutes: commuteBufferMinutes),
+                     presenceStartedAt: clickedAt)
     }
 
     /// 设置或修改今天的到岗时间（随时可在设置里补填、修改）
     /// 只取时分，落在当前工作日；晚于现在时按现在算
-    func setStartTime(_ date: Date) {
+    func setStartTime(_ date: Date, presenceStartedAt: Date? = nil) {
         let current = Date()
         let c = Calendar.current.dateComponents([.hour, .minute], from: date)
         var start = Calendar.current.date(bySettingHour: c.hour ?? 0, minute: c.minute ?? 0, second: 0,
@@ -310,7 +329,13 @@ final class WorkTimerModel: ObservableObject {
         let defaults = UserDefaults.standard
         defaults.set(start, forKey: Keys.todayStartTime)
         defaults.set(workdayKey, forKey: Keys.todayStartDay)
-        activityStore.recordWorkStart(workday: workdayKey, at: start, plannedSeconds: workHours * 3600)
+        if let presenceStartedAt {
+            activityStore.recordManualWorkStart(workday: workdayKey, countdownStartedAt: start,
+                                                plannedSeconds: workHours * 3600,
+                                                presenceStartedAt: presenceStartedAt)
+        } else {
+            activityStore.recordWorkStart(workday: workdayKey, at: start, plannedSeconds: workHours * 3600)
+        }
     }
 
     // MARK: - 计时
@@ -377,12 +402,23 @@ final class WorkTimerModel: ObservableObject {
     private func checkAutoStart(_ date: Date) {
         guard autoStartGate.unlockConfirmed, !screenAsleep, !lockedByNotification,
               !Self.sessionIsLocked() else { return }
+        // 公司电脑在下班后再次有效解锁：这是新的加班片段，不是第二次“早晨自动开始”。
+        // 不消耗 AutoStartGate，直到凌晨 05:00 前都可睡眠后继续累计，离线间隔不算工时。
+        if isResting,
+           Self.shouldResumeOfficePresence(at: date, plannedEnd: endTime,
+                                           hasCompletedSegment: activityStore.hasCompletedOfficePresenceSegment(workday: workdayKey)) {
+            activityStore.startOfficePresenceSegment(workday: workdayKey, at: date)
+            isResting = false
+            restingUnlockActive = false
+            isWaitingForUnlock = false
+            return
+        }
         guard autoStartGate.takeCheck(workday: workdayKey,
                                       active: autoStartEnabled && workMode == .flexible) else { return }
         if Self.shouldAutoStart(at: date, enabled: autoStartEnabled, mode: workMode,
                                 hasArrived: todayStartTime != nil, weekdays: autoStartWeekdays,
                                 startText: startText, latestText: latestText) {
-            // 屏幕时间的起点与自动倒计时成功启动是同一次有效解锁；不使用缓冲回拨后的到岗时间。
+            // 在岗时间的起点与自动倒计时成功启动是同一次有效解锁；不使用缓冲回拨后的到岗时间。
             activityStore.recordOfficePresenceStart(workday: workdayKey, at: date)
             setStartTime(Self.autoStartArrival(at: date, bufferEnabled: commuteBufferEnabled,
                                                bufferMinutes: commuteBufferMinutes))
@@ -515,7 +551,7 @@ final class WorkTimerModel: ObservableObject {
         return max(0, elapsed / total)
     }
 
-    /// 截至指定时刻的正常工作秒数；下班后的倒欠时间不计入屏幕时间统计。
+    /// 截至指定时刻的正常工作秒数；下班后的倒欠时间不计入在岗时间统计。
     func workedSeconds(at date: Date = Date()) -> TimeInterval {
         guard let start = progressStart, let end = endTime else { return 0 }
         return max(0, min(date, end).timeIntervalSince(start))
@@ -564,7 +600,7 @@ final class WorkTimerModel: ObservableObject {
                                           startText: startText, latestText: latestText)
     }
 
-    /// 是否位于上班日及自动开始的时间窗口内。屏幕时间记录复用此资格，
+    /// 是否位于上班日及自动开始的时间窗口内。在岗时间记录复用此资格，
     /// 但不依赖自动倒计时开关或是否已手动到岗。
     static func shouldRecordOfficePresence(at date: Date, weekdays: Set<Int>,
                                            startText: String, latestText: String) -> Bool {
@@ -580,6 +616,17 @@ final class WorkTimerModel: ObservableObject {
     static func shouldEndOfficePresence(at date: Date, plannedEnd: Date?) -> Bool {
         guard let plannedEnd else { return false }
         return date >= plannedEnd
+    }
+
+    /// 同一工作日下班后，已封存过的公司电脑再次得到有效解锁证据时续开加班片段。
+    static func shouldResumeOfficePresence(at date: Date, plannedEnd: Date?, hasCompletedSegment: Bool) -> Bool {
+        guard hasCompletedSegment, let plannedEnd else { return false }
+        return date >= plannedEnd
+    }
+
+    /// 异常关机后用持久化的最后心跳收口；不猜测离线期间的时长。
+    static func shouldRecoverOpenOfficePresence(lastAlive: Date, plannedEnd: Date?) -> Bool {
+        shouldEndOfficePresence(at: lastAlive, plannedEnd: plannedEnd)
     }
 
     static func shouldWaitForUnlockAfterBoundary(wasResting: Bool, carriedIntoNewDay: Bool) -> Bool {
