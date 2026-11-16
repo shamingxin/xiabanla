@@ -49,6 +49,29 @@ check("登录 2 小时后才手动打开 → 不算", WorkTimerModel.launchCount
 check("读不到登录时间 → 不算", WorkTimerModel.launchCountsAsLogin(
     launchAtLogin: true, loginTime: nil, now: d(2026,11,13,9,49)), false)
 
+print("— 默认开机自动倒计时迁移 —")
+let migrationSuite = "xiabanla.migration.tests.\(UUID().uuidString)"
+let migrationDefaults = UserDefaults(suiteName: migrationSuite)!
+defer { migrationDefaults.removePersistentDomain(forName: migrationSuite) }
+var registrations: [Bool] = []
+check("首次启动迁移会执行", WorkTimerModel.applyAutomaticStartupDefaultMigration(
+    defaults: migrationDefaults,
+    registerLoginItem: { registrations.append($0) }), true)
+check("首次启动默认登录时打开", migrationDefaults.bool(forKey: "launchAtLogin"), true)
+check("首次启动默认自动计时", migrationDefaults.bool(forKey: "autoStartEnabled"), true)
+check("首次启动默认周一至周五", Set(migrationDefaults.array(forKey: "autoStartWeekdays") as? [Int] ?? [])
+    == WorkTimerModel.defaultAutoStartWeekdays, true)
+check("首次迁移注册登录项", registrations == [true], true)
+
+migrationDefaults.set(false, forKey: "launchAtLogin")
+migrationDefaults.set(false, forKey: "autoStartEnabled")
+check("已迁移后不覆盖用户关闭选择", WorkTimerModel.applyAutomaticStartupDefaultMigration(
+    defaults: migrationDefaults,
+    registerLoginItem: { registrations.append($0) }), false)
+check("已迁移后登录时打开仍关闭", migrationDefaults.bool(forKey: "launchAtLogin"), false)
+check("已迁移后自动计时仍关闭", migrationDefaults.bool(forKey: "autoStartEnabled"), false)
+check("已迁移后不重复注册", registrations == [true], true)
+
 print("— 到工位缓冲 —")
 func arrival(_ at: Date, on: Bool, _ minutes: Int = 5) -> Date {
     WorkTimerModel.autoStartArrival(at: at, bufferEnabled: on, bufferMinutes: minutes)

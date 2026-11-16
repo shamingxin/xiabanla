@@ -209,15 +209,34 @@ final class WorkTimerModel: ObservableObject {
         static let lastAlive = "lastAlive"
         static let autoStartEnabled = "autoStartEnabled"
         static let autoStartWeekdays = "autoStartWeekdays"
+        /// 一次性把新旧用户迁移到默认开机自动倒计时；迁移后尊重用户自己的开关选择
+        static let automaticStartupDefaultsMigrated = "automaticStartupDefaultsMigrated"
         /// 旧版「离开开始时间」，4 小时规则已移除，启动时清掉
         static let legacyAwayStart = "awayStart"
         static let commuteBufferEnabled = "autoStartCommuteBufferEnabled"
         static let commuteBufferMinutes = "autoStartCommuteBufferMinutes"
     }
 
+    /// 首次启动或升级后默认开启登录启动与自动计时；只执行一次，之后不覆盖用户手动关闭的选择。
+    @discardableResult
+    static func applyAutomaticStartupDefaultMigration(defaults: UserDefaults,
+                                                      registerLoginItem: (Bool) -> Void) -> Bool {
+        guard !defaults.bool(forKey: Keys.automaticStartupDefaultsMigrated) else { return false }
+        defaults.set(true, forKey: Keys.launchAtLogin)
+        defaults.set(true, forKey: Keys.autoStartEnabled)
+        if defaults.array(forKey: Keys.autoStartWeekdays) == nil {
+            defaults.set(defaultAutoStartWeekdays.sorted(), forKey: Keys.autoStartWeekdays)
+        }
+        defaults.set(true, forKey: Keys.automaticStartupDefaultsMigrated)
+        registerLoginItem(true)
+        return true
+    }
+
     init(activityStore: ActivityStore = ActivityStore()) {
         self.activityStore = activityStore
         let defaults = UserDefaults.standard
+        WorkTimerModel.applyAutomaticStartupDefaultMigration(defaults: defaults,
+                                                             registerLoginItem: LoginItemManager.setEnabled)
         self.workMode = WorkMode(rawValue: defaults.string(forKey: Keys.workMode) ?? "") ?? .flexible
         self.workHours = defaults.object(forKey: Keys.workHours) as? Double ?? 9.0
         self.startText = defaults.string(forKey: Keys.startTime) ?? Self.defaultStartText
