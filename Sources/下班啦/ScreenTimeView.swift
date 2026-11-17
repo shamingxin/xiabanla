@@ -24,13 +24,17 @@ struct ScreenTimeView: View {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(primaryTitle).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
-                        Text(duration(primarySeconds)).font(.system(size: 30, weight: .medium, design: .rounded)).monospacedDigit()
+                        Text(primaryDurationText).font(.system(size: 30, weight: .medium, design: .rounded)).monospacedDigit()
                     }
                     Spacer()
                     VStack(alignment: .trailing, spacing: 3) {
                         Text(compareTitle).font(.system(size: 11)).foregroundStyle(.secondary)
                         Text(compareText).font(.system(size: 12, weight: .medium)).foregroundStyle(compareHasData ? .primary : .secondary)
                     }
+                }
+                if period == .day {
+                    DailyPresenceMetrics(text: DailyPresenceMetricText(summary: dailyPresenceSummary))
+                        .padding(.top, 5)
                 }
                 if period == .week {
                     Text("每天的在岗时间").font(.system(size: 11)).foregroundStyle(.secondary)
@@ -39,7 +43,7 @@ struct ScreenTimeView: View {
                 HStack {
                     Text(period == .day ? "当天在岗" : "本周平均在岗").font(.system(size: 12)).foregroundStyle(.secondary)
                     Spacer()
-                    Text(duration(period == .day ? primarySeconds : weekAverage)).font(.system(size: 13, weight: .semibold, design: .rounded)).monospacedDigit()
+                    Text(period == .day ? primaryDurationText : duration(weekAverage)).font(.system(size: 13, weight: .semibold, design: .rounded)).monospacedDigit()
                 }.padding(.top, 4)
             }
             VStack(alignment: .leading, spacing: 0) {
@@ -60,12 +64,15 @@ struct ScreenTimeView: View {
     private var selectedDay: Date { calendar.startOfDay(for: selectedDate) }
     private var primaryTitle: String { period == .day ? (calendar.isDateInToday(selectedDay) ? "今天的在岗时间" : "\(selectedDay.formatted(.dateTime.month().day())) 的在岗时间") : "本周累计在岗时间" }
     private var primarySeconds: TimeInterval { period == .day ? workSeconds(on: selectedDay) : weekValues.reduce(0, +) }
+    private var primaryDurationText: String {
+        period == .day && dailyPresenceSummary.creditedSeconds == nil ? "未记录" : duration(primarySeconds)
+    }
     private var compareTitle: String { period == .day ? "与昨天比" : "与上周比" }
     private var compareReference: TimeInterval {
         if period == .day { return workSeconds(on: calendar.date(byAdding: .day, value: -1, to: selectedDay)!) }
         return weekAverage(for: calendar.date(byAdding: .day, value: -7, to: weekStart)!)
     }
-    private var compareHasData: Bool { compareReference > 0 }
+    private var compareHasData: Bool { period == .day ? dailyPresenceSummary.creditedSeconds != nil && compareReference > 0 : compareReference > 0 }
     private var compareText: String {
         guard compareHasData else { return period == .day ? "暂无昨天数据" : "暂无上周数据" }
         let change = Int(((primarySeconds - compareReference) / compareReference * 100).rounded())
@@ -78,6 +85,14 @@ struct ScreenTimeView: View {
     }
     private var weekValues: [TimeInterval] { (0..<7).map { workSeconds(on: calendar.date(byAdding: .day, value: $0, to: weekStart)!) } }
     private var weekAverage: TimeInterval { weekAverage(for: weekStart) }
+    private var dailyPresenceSummary: DailyPresenceSummary {
+        let key = workdayKey(forCalendarDay: selectedDay)
+        return DailyPresenceSummary.make(segments: activity.officePresenceSegments(workday: key),
+                                         countdownArrival: session(on: selectedDay)?.startedAt,
+                                         plannedSeconds: session(on: selectedDay)?.plannedSeconds,
+                                         now: model.now,
+                                         isCurrentWorkday: key == WorkTimerModel.workdayKey(for: model.now))
+    }
     private var waterSummary: ActivityDaySummary {
         if period == .day { return activity.summary(for: selectedDay) }
         return (0..<7).reduce(ActivityDaySummary()) { partial, offset in
@@ -87,10 +102,12 @@ struct ScreenTimeView: View {
     }
     private func session(on day: Date) -> WorkSession? {
         let key = workdayKey(forCalendarDay: day)
+        // 优先使用开始当天已写入的计划工时，避免用户午后修改全局设置而回算当天加班。
+        if let saved = activity.workSession(workday: key) { return saved }
         if key == WorkTimerModel.workdayKey(for: Date()), let start = model.todayStartTime {
             return WorkSession(workday: key, startedAt: start, plannedSeconds: model.workHours * 3600)
         }
-        return activity.workSession(workday: key)
+        return nil
     }
     private func workSeconds(on day: Date) -> TimeInterval {
         let todayStart = calendar.startOfDay(for: Date())
@@ -99,8 +116,12 @@ struct ScreenTimeView: View {
         let key = workdayKey(forCalendarDay: day)
         let segments = activity.officePresenceSegments(workday: key)
         if !segments.isEmpty {
-            return activity.officePresenceSeconds(workday: key, now: model.now,
-                                                  includeOpenSegment: key == WorkTimerModel.workdayKey(for: model.now))
+            return DailyPresenceSummary.make(segments: segments,
+                                             countdownArrival: session.startedAt,
+                                             plannedSeconds: session.plannedSeconds,
+                                             now: model.now,
+                                             isCurrentWorkday: key == WorkTimerModel.workdayKey(for: model.now))
+                .creditedSeconds ?? 0
         }
         return ScreenTimeDuration.seconds(for: activity.officePresenceSession(workday: key),
                                           plannedSeconds: session.plannedSeconds,
@@ -161,6 +182,37 @@ private struct ScreenTimeCard<Content: View>: View {
     @Environment(\.colorScheme) private var scheme
     init(@ViewBuilder content: () -> Content) { self.content = content() }
     var body: some View { VStack(alignment: .leading, spacing: 9) { content }.padding(14).background(ZStack { RoundedRectangle(cornerRadius: SettingsMetrics.cardRadius, style: .continuous).fill(palette.card); if scheme == .dark { RoundedRectangle(cornerRadius: SettingsMetrics.cardRadius, style: .continuous).fill(.black.opacity(0.42)) } }) }
+}
+
+private struct DailyPresenceMetrics: View {
+    let text: DailyPresenceMetricText
+    @Environment(\.settingsPalette) private var palette
+    @Environment(\.themeAccent) private var accent
+
+    var body: some View {
+        HStack(spacing: 9) {
+            metric(title: "到岗时间", value: text.arrival)
+            metric(title: "下班时间", value: text.departure)
+            metric(title: "加班时长", value: text.overtime, emphasize: text.overtime != "—")
+        }
+    }
+
+    private func metric(title: String, value: String, emphasize: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.system(size: 11)).foregroundStyle(.secondary)
+            Text(value).font(.system(size: 16, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(emphasize ? accent : .primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        }
+        .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(palette.card))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title) \(value)")
+    }
 }
 
 private struct WorkWeekChart: View {

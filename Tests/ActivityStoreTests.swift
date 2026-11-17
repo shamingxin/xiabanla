@@ -53,6 +53,15 @@ check("按周只读取已封存实际在岗记录", completedForWeek.count, 1)
 check("按周读取保留计划工时", completedForWeek.first?.plannedSeconds, 9 * 3600)
 check("按周读取保留实际在岗时长", completedForWeek.first?.presenceSeconds, 11 * 3600 + 58 * 60)
 
+let bufferedHappinessDay = "2026-11-11"
+store.recordWorkStart(workday: bufferedHappinessDay, at: date(11, 10, 30), plannedSeconds: 9 * 3600)
+store.recordOfficePresenceStart(workday: bufferedHappinessDay, at: date(11, 10, 40))
+store.recordOfficePresenceEnd(workday: bufferedHappinessDay, at: date(11, 19, 35))
+check("已封存记录把缓冲计入幸福指数", store.completedOfficeSessions(from: bufferedHappinessDay,
+      through: bufferedHappinessDay).first?.presenceSeconds, 9 * 3600 + 5 * 60)
+store.recordWorkStart(workday: bufferedHappinessDay, at: date(11, 10, 30), plannedSeconds: 8 * 3600)
+check("当天开始后修改基础工时不改写计划快照", store.workSession(workday: bufferedHappinessDay)?.plannedSeconds, 9 * 3600)
+
 let manualWorkday = "2026-11-13"
 store.recordManualWorkStart(workday: manualWorkday,
                             countdownStartedAt: date(13, 10, 15),
@@ -84,8 +93,68 @@ check("当天未结束时按当前时刻累计", ScreenTimeDuration.seconds(for:
 check("当天缺少真实会话时按倒计时起点累计", ScreenTimeDuration.seconds(for: nil,
       plannedSeconds: 9 * 3600, now: date(12, 19, 0), isCurrentWorkday: true,
       fallbackStartedAt: date(12, 10, 18)), 8 * 3600 + 42 * 60)
-check("历史未结束记录回退计划时长", ScreenTimeDuration.seconds(for: openPresence,
-      plannedSeconds: 9 * 3600, now: date(13, 9), isCurrentWorkday: false), 9 * 3600)
+check("历史未结束记录不伪造计划时长", ScreenTimeDuration.seconds(for: openPresence,
+      plannedSeconds: 9 * 3600, now: date(13, 9), isCurrentWorkday: false), 0)
+
+let completedSummary = DailyPresenceSummary.make(
+    segments: [OfficePresenceSegment(id: 1, workday: "2026-11-14",
+                                     startedAt: date(14, 9), endedAt: date(14, 18, 30))],
+    countdownArrival: date(14, 8, 55), plannedSeconds: 9 * 3600,
+    now: date(14, 22), isCurrentWorkday: false)
+check("按天摘要到岗时间跟随缓冲后的倒计时起点", completedSummary.arrivalTime, date(14, 8, 55))
+check("按天摘要显示下班时间", completedSummary.departure, .recorded(date(14, 18, 30)))
+check("按天摘要把缓冲时间计入加班时长", completedSummary.overtimeSeconds, 35 * 60)
+
+let bufferedDurationSummary = DailyPresenceSummary.make(
+    segments: [OfficePresenceSegment(id: 1, workday: "2026-11-16",
+                                     startedAt: date(16, 10, 40), endedAt: date(16, 19, 35))],
+    countdownArrival: date(16, 10, 30), plannedSeconds: 9 * 3600,
+    now: date(16, 22), isCurrentWorkday: false)
+check("缓冲时间计入当天在岗累计", bufferedDurationSummary.creditedSeconds, 9 * 3600 + 5 * 60)
+check("缓冲时间后加班正确", bufferedDurationSummary.overtimeSeconds, 5 * 60)
+
+let multiSegmentSummary = DailyPresenceSummary.make(
+    segments: [OfficePresenceSegment(id: 1, workday: "2026-11-14", startedAt: date(14, 9), endedAt: date(14, 12)),
+               OfficePresenceSegment(id: 2, workday: "2026-11-14", startedAt: date(14, 13), endedAt: date(14, 20))],
+    plannedSeconds: 9 * 3600, now: date(14, 22), isCurrentWorkday: false)
+check("按天摘要取最早到岗", multiSegmentSummary.arrivalTime, date(14, 9))
+check("按天摘要取最后下班", multiSegmentSummary.departure, .recorded(date(14, 20)))
+check("按天摘要不把间隔算作加班", multiSegmentSummary.overtimeSeconds, 60 * 60)
+
+let openSummary = DailyPresenceSummary.make(
+    segments: [OfficePresenceSegment(id: 1, workday: "2026-11-14", startedAt: date(14, 9), endedAt: nil)],
+    plannedSeconds: 9 * 3600, now: date(14, 19, 30), isCurrentWorkday: true)
+check("当天开放片段显示仍在岗", openSummary.departure, .stillPresent)
+check("当天开放片段计算加班", openSummary.overtimeSeconds, 90 * 60)
+
+let historicalOpenSummary = DailyPresenceSummary.make(
+    segments: [OfficePresenceSegment(id: 1, workday: "2026-11-14", startedAt: date(14, 9), endedAt: nil)],
+    plannedSeconds: 9 * 3600, now: date(15, 9), isCurrentWorkday: false)
+check("历史开放片段显示记录未结束", historicalOpenSummary.departure, .incomplete)
+check("历史开放片段不展示不完整累计", historicalOpenSummary.creditedSeconds, nil)
+
+let unavailableSummary = DailyPresenceSummary.make(segments: [], plannedSeconds: 9 * 3600,
+                                                    now: date(14, 22), isCurrentWorkday: false)
+check("没有真实记录不虚构到岗时间", unavailableSummary.arrivalTime, nil)
+check("没有真实记录不虚构下班时间", unavailableSummary.departure, .unavailable)
+check("没有真实记录不虚构加班时长", unavailableSummary.overtimeSeconds, nil)
+
+let noPlanSummary = DailyPresenceSummary.make(
+    segments: [OfficePresenceSegment(id: 1, workday: "2026-11-14", startedAt: date(14, 9), endedAt: date(14, 20))],
+    plannedSeconds: nil, now: date(14, 22), isCurrentWorkday: false)
+check("没有计划工时不虚构加班时长", noPlanSummary.overtimeSeconds, nil)
+
+let completedMetricText = DailyPresenceMetricText(summary: completedSummary)
+check("按天摘要格式化缓冲后的到岗时间", completedMetricText.arrival, "08:55")
+check("按天摘要格式化下班时间", completedMetricText.departure, "18:30")
+check("按天摘要格式化加班时长", completedMetricText.overtime, "35 分钟")
+let openMetricText = DailyPresenceMetricText(summary: openSummary)
+check("按天摘要在岗状态文案", openMetricText.departure, "仍在岗")
+let unavailableMetricText = DailyPresenceMetricText(summary: unavailableSummary)
+check("按天摘要缺失记录文案", unavailableMetricText.arrival, "未记录")
+check("按天摘要未加班显示横线", DailyPresenceMetricText(summary: DailyPresenceSummary.make(
+    segments: [OfficePresenceSegment(id: 1, workday: "2026-11-14", startedAt: date(14, 9), endedAt: date(14, 17))],
+    plannedSeconds: 9 * 3600, now: date(14, 22), isCurrentWorkday: false)).overtime, "—")
 check("在岗时间默认显示本周", ScreenTimePeriod.defaultPeriod, .week)
 
 print(failures == 0 ? "全部通过" : "失败 \(failures) 项")

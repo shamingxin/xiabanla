@@ -156,7 +156,7 @@ final class ActivityStore {
         guard let database else { return }
         var statement: OpaquePointer?
         defer { sqlite3_finalize(statement) }
-        let sql = "INSERT INTO work_sessions (workday, started_at, planned_seconds) VALUES (?, ?, ?) ON CONFLICT(workday) DO UPDATE SET started_at = excluded.started_at, planned_seconds = excluded.planned_seconds"
+        let sql = "INSERT INTO work_sessions (workday, started_at, planned_seconds) VALUES (?, ?, ?) ON CONFLICT(workday) DO UPDATE SET started_at = excluded.started_at, planned_seconds = CASE WHEN work_sessions.planned_seconds > 0 THEN work_sessions.planned_seconds ELSE excluded.planned_seconds END"
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else { return }
         sqlite3_bind_text(statement, 1, workday, -1, sqliteTransient)
         sqlite3_bind_double(statement, 2, date.timeIntervalSinceReferenceDate)
@@ -294,7 +294,7 @@ final class ActivityStore {
         var statement: OpaquePointer?
         defer { sqlite3_finalize(statement) }
         let sql = """
-        SELECT workday, planned_seconds, presence_started_at, presence_ended_at
+        SELECT workday, started_at, planned_seconds, presence_started_at, presence_ended_at
         FROM work_sessions
         WHERE workday >= ? AND workday <= ?
         ORDER BY workday ASC
@@ -306,20 +306,23 @@ final class ActivityStore {
         while sqlite3_step(statement) == SQLITE_ROW {
             guard let workdayText = sqlite3_column_text(statement, 0) else { continue }
             let workday = String(cString: workdayText)
+            let countdownStartedAt = Date(timeIntervalSinceReferenceDate: sqlite3_column_double(statement, 1))
             let segments = officePresenceSegments(workday: workday)
             if !segments.isEmpty {
                 guard !segments.contains(where: { $0.endedAt == nil }) else { continue }
                 let seconds = officePresenceSeconds(workday: workday, now: Date(), includeOpenSegment: false)
+                let firstSegmentStart = segments.map(\.startedAt).min()!
+                let commuteCredit = max(0, firstSegmentStart.timeIntervalSince(countdownStartedAt))
                 result.append(HappinessScore.Session(workday: workday,
-                                                     plannedSeconds: max(0, sqlite3_column_double(statement, 1)),
-                                                     presenceSeconds: seconds))
-            } else if sqlite3_column_type(statement, 2) != SQLITE_NULL,
-                      sqlite3_column_type(statement, 3) != SQLITE_NULL {
-                let started = sqlite3_column_double(statement, 2)
-                let ended = sqlite3_column_double(statement, 3)
+                                                     plannedSeconds: max(0, sqlite3_column_double(statement, 2)),
+                                                     presenceSeconds: seconds + commuteCredit))
+            } else if sqlite3_column_type(statement, 3) != SQLITE_NULL,
+                      sqlite3_column_type(statement, 4) != SQLITE_NULL {
+                let started = sqlite3_column_double(statement, 3)
+                let ended = sqlite3_column_double(statement, 4)
                 result.append(HappinessScore.Session(workday: workday,
-                                                     plannedSeconds: max(0, sqlite3_column_double(statement, 1)),
-                                                     presenceSeconds: max(0, ended - started)))
+                                                     plannedSeconds: max(0, sqlite3_column_double(statement, 2)),
+                                                     presenceSeconds: max(0, ended - started) + max(0, started - countdownStartedAt.timeIntervalSinceReferenceDate)))
             }
         }
         return result
