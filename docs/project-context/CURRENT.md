@@ -4,7 +4,7 @@ updated_at: "2026-11-17T15:15:00+08:00"
 handoff_id: "2026-11-13-150000-main-01"
 workspace: "."
 branch: "main"
-working_tree: "v1.8.3（build 12）已构建、签名和打包，待随本次提交推送；本地仅保留最新版安装包"
+working_tree: "v1.8.3（build 12）已推送到 GitHub main 与标签 v1.8.3；本地仅保留最新版安装包"
 ---
 
 # 当前任务接力
@@ -13,7 +13,7 @@ working_tree: "v1.8.3（build 12）已构建、签名和打包，待随本次提
 
 ## 当前状态
 
-- v1.8.3（build 12）发布本次在岗时间数据一致性修复：按天累计、加班与幸福指数统一补入到工位缓冲；当天计划工时在开始时锁定；历史未封存记录显示「记录未结束」而不再伪造工时。`Tests/run.sh`、`build.sh` 与 `codesign --verify --deep --strict` 于 2026-11-17 通过。安装包为 `release/下班啦-v1.8.3.zip`，SHA-256 `dc333a70020f76d23886b059f851eaa3edf3d9be15213ad648f318ec8b4b9be2`。
+- v1.8.3（build 12）已推送：提交 `e76cf34`、标签 `v1.8.3`。本次统一在岗页、加班和幸福指数的缓冲计算；当天计划工时在开始时锁定；历史未封存记录显示「记录未结束」而不再伪造工时。`Tests/run.sh`、`build.sh` 与 `codesign --verify --deep --strict` 于 2026-11-17 通过。安装包为 [release/下班啦-v1.8.3.zip](https://github.com/shamingxin/xiabanla/blob/v1.8.3/release/%E4%B8%8B%E7%8F%AD%E5%95%A6-v1.8.3.zip)，SHA-256 `dc333a70020f76d23886b059f851eaa3edf3d9be15213ad648f318ec8b4b9be2`。
 - 已完成「在岗时间」按天摘要：累计时长下方仅显示「到岗时间 / 下班时间 / 加班时长」，不再显示片段明细或说明文字。到岗时间取倒计时起点，启用「到工位缓冲」时会与主卡片「XX:XX 到」同步回拨；当天累计、加班与幸福指数都会补入倒计时起点至首段真实在岗的正向缓冲，下班取全部片段封存后的最后终点。当天有开放片段显示「仍在岗」；历史开放片段显示「记录未结束」且不显示虚假的累计。当天计划工时会在首次开始时锁定，修改全局基础工时只影响下一次开始上班。睡眠、熄屏、关机间隔仍不计入。新增纯计算与文案测试，2026-11-17 已运行 `Tests/run.sh`、`build.sh` 和 `codesign --verify --deep --strict`，全部通过；新构建已重启，真机视觉验收待用户查看。
 - v1.8.2（build 11）已公开发布：发布提交 `4f4c308`、标签与 [GitHub Release](https://github.com/shamingxin/xiabanla/releases/tag/v1.8.2) 均已公开，并在 2026-11-17 的 Release 页面验证为 Latest。Release 说明提供标签内 `release/下班啦-v1.8.2.zip` 的下载链接（网页附件上限为 25 MB，约 60 MB 安装包不作为 Release Asset 上传）。首次启动或升级后的下一次启动，会一次性默认开启「登录时打开」与「自动计时」，默认上班日为周一至周五；迁移后仍尊重用户手动关闭或修改上班日的选择。安装包 SHA-256 为 `f486b6f3f09a8a71f08a03ba6fc3c9390933b56049eb466b2052035a52325e2d`。
 - v1.8.1（build 10）已公开发布：发布提交 `810fbdd`，标签与 [GitHub Release](https://github.com/shamingxin/xiabanla/releases/tag/v1.8.1) 均已公开。约 60 MB 的 `release/下班啦-v1.8.1.zip` 已随标签推送；GitHub 网页 Release 附件上限为 25 MB，上传被拒，因此 Release 说明改为直接链接仓库中的安装包。推送时 GitHub 仅提示超过 50 MB 的 LFS 建议阈值，未阻止发布。
