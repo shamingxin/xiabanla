@@ -4,7 +4,7 @@ updated_at: "2026-11-18T12:00:00+08:00"
 handoff_id: "2026-11-13-150000-main-01"
 workspace: "."
 branch: "main"
-working_tree: "v1.8.4（build 13）安装包已生成，待推送标签并创建 GitHub Release"
+working_tree: "v1.8.4（build 13）已公开发布；发布记录文档待推送"
 ---
 
 # 当前任务接力
@@ -13,7 +13,7 @@ working_tree: "v1.8.4（build 13）安装包已生成，待推送标签并创建
 
 ## 当前状态
 
-- v1.8.4（build 13）待发布：包含提醒动画库与设置文案迭代。喝水和随机彩蛋在设置内各自显示 5 列紧凑视频首帧缩略图；默认全部选中，选择按类别持久化，随机提醒与预览仅从已选动画中抽取。每类至少保留一个动画；尝试取消最后一项会显示 2 秒「至少保留一个动画。」toast。新增 `Tests/ReminderSelectionTests.swift` 覆盖默认全选、删除素材过滤、最后一项保护、重新选中与随机池过滤。设置辅助文案采用「克制高级型」：保留功能名和数值，改写自动计时、登录项、到工位缓冲、强制提醒和动画说明；幸福指数首屏按钮改为「回望本周」，关于页副标题为「把时间留给生活。」；移除了幸福指数首屏与结果页底部的冗余说明。2026-11-18 已运行 `Tests/run.sh`、`build.sh` 和 `codesign --verify --deep --strict`，全部通过。安装包 `release/下班啦-v1.8.4.zip` 已验证包内版本为 1.8.4，SHA-256 `8c1658e34a6a4e50db34d38fce2ce7f605713f178b251d5f43a4e3f6e155f124`；待推送标签并建立 Release 条目。
+- v1.8.4（build 13）已公开发布：提交与标签为 `d2ee261` / `v1.8.4`，GitHub Release 已标记为 Latest。包含提醒动画库与设置文案迭代：喝水和随机彩蛋在设置内各自显示 5 列紧凑视频首帧缩略图；默认全部选中，选择按类别持久化，随机提醒与预览仅从已选动画中抽取。每类至少保留一个动画；尝试取消最后一项会显示 2 秒「至少保留一个动画。」toast。新增 `Tests/ReminderSelectionTests.swift` 覆盖默认全选、删除素材过滤、最后一项保护、重新选中与随机池过滤。设置辅助文案采用「克制高级型」：保留功能名和数值，改写自动计时、登录项、到工位缓冲、强制提醒和动画说明；幸福指数首屏按钮改为「回望本周」，关于页副标题为「把时间留给生活。」；移除了幸福指数首屏与结果页底部的冗余说明。2026-11-18 已运行 `Tests/run.sh`、`build.sh` 和 `codesign --verify --deep --strict`，全部通过。安装包为 [release/下班啦-v1.8.4.zip](https://github.com/shamingxin/xiabanla/raw/refs/tags/v1.8.4/release/%E4%B8%8B%E7%8F%AD%E5%95%A6-v1.8.4.zip)，SHA-256 `8c1658e34a6a4e50db34d38fce2ce7f605713f178b251d5f43a4e3f6e155f124`；[GitHub Release](https://github.com/shamingxin/xiabanla/releases/tag/v1.8.4) 已在发布页核验。
 
 - v1.8.3（build 12）已推送：提交 `e76cf34`、标签 `v1.8.3`。本次统一在岗页、加班和幸福指数的缓冲计算；当天计划工时在开始时锁定；历史未封存记录显示「记录未结束」而不再伪造工时。`Tests/run.sh`、`build.sh` 与 `codesign --verify --deep --strict` 于 2026-11-17 通过。安装包为 [release/下班啦-v1.8.3.zip](https://github.com/shamingxin/xiabanla/blob/v1.8.3/release/%E4%B8%8B%E7%8F%AD%E5%95%A6-v1.8.3.zip)，SHA-256 `dc333a70020f76d23886b059f851eaa3edf3d9be15213ad648f318ec8b4b9be2`。
 - 已完成「在岗时间」按天摘要：累计时长下方仅显示「到岗时间 / 下班时间 / 加班时长」，不再显示片段明细或说明文字。到岗时间取倒计时起点，启用「到工位缓冲」时会与主卡片「XX:XX 到」同步回拨；当天累计、加班与幸福指数都会补入倒计时起点至首段真实在岗的正向缓冲，下班取全部片段封存后的最后终点。当天有开放片段显示「仍在岗」；历史开放片段显示「记录未结束」且不显示虚假的累计。当天计划工时会在首次开始时锁定，修改全局基础工时只影响下一次开始上班。睡眠、熄屏、关机间隔仍不计入。新增纯计算与文案测试，2026-11-17 已运行 `Tests/run.sh`、`build.sh` 和 `codesign --verify --deep --strict`，全部通过；新构建已重启，真机视觉验收待用户查看。
