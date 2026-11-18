@@ -58,6 +58,27 @@ enum VideoSelectionState {
     }
 }
 
+/// 设置页动画库的临时展开状态，不持久化，离开提醒动画分区后重置。
+struct ReminderLibraryExpansionState {
+    private var expandedKinds: Set<ReminderKind> = []
+
+    func isExpanded(_ kind: ReminderKind) -> Bool {
+        expandedKinds.contains(kind)
+    }
+
+    mutating func toggle(_ kind: ReminderKind) {
+        if expandedKinds.contains(kind) {
+            expandedKinds.remove(kind)
+        } else {
+            expandedKinds.insert(kind)
+        }
+    }
+
+    mutating func collapseAll() {
+        expandedKinds.removeAll()
+    }
+}
+
 /// 喝水提醒 + 小彩蛋：保存设置，并每秒检查是否到了该弹气泡的时间
 final class ReminderModel: ObservableObject {
 

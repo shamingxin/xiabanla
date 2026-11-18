@@ -37,7 +37,8 @@ struct HappinessIndexView: View {
 
     private var invitationView: some View {
         VStack(spacing: 0) {
-            HappinessMediaCard().frame(height: 178)
+            HappinessMediaCard()
+                .aspectRatio(1, contentMode: .fit)
             VStack(spacing: 7) {
                 Text("本周幸福指数")
                     .font(.system(size: 22, weight: .bold, design: .rounded))
@@ -66,7 +67,8 @@ struct HappinessIndexView: View {
 
     private func measuringView(step: Int) -> some View {
         VStack(spacing: 0) {
-            HappinessMediaCard().frame(height: 178)
+            HappinessMediaCard()
+                .aspectRatio(1, contentMode: .fit)
             VStack(spacing: 8) {
                 Text("正在认真测量中")
                     .font(.system(size: 21, weight: .bold, design: .rounded))

@@ -10,10 +10,10 @@ import AVFoundation
 /// 设置面板侧边栏分区：对应系统设置左侧列表
 enum SettingsSidebarItem: String, CaseIterable, Identifiable {
     case workHours = "工作时长"
-    case screenTime = "在岗时间"
-    case happinessIndex = "幸福指数"
     case reminderAnimations = "提醒动画"
     case general = "通用"
+    case screenTime = "在岗时间"
+    case happinessIndex = "幸福指数"
     case appearance = "外观"
     case about = "关于"
 
@@ -135,6 +135,8 @@ struct SettingsView: View {
     @State private var toastToken = 0
     /// 当前选中的侧边栏分区，默认「工作时长」
     @State private var selectedSection: SettingsSidebarItem = .workHours
+    /// 动画库仅在当前提醒页会话中展开；离开该分区即恢复收起。
+    @State private var libraryExpansion = ReminderLibraryExpansionState()
     /// 在岗时间的筛选状态由内容区与日期控制组共享。
     @StateObject private var screenTimeState = ScreenTimeState()
 
@@ -215,6 +217,11 @@ struct SettingsView: View {
         // 宽度固定；高度跟随窗口（用户可上下拖动），由 AppDelegate 限制最小/最大高度
         .frame(width: SettingsMetrics.windowWidth)
         .frame(minHeight: SettingsMetrics.minWindowHeight, maxHeight: .infinity)
+        .onChange(of: selectedSection) { section in
+            if section != .reminderAnimations {
+                libraryExpansion.collapseAll()
+            }
+        }
         // 窗口外框圆角自己画：用 15.x SDK 编译时系统只给小圆角，和 macOS 26 系统设置对不上
         // 窗口本身是透明的（见 AppDelegate.applySettingsAppearance），可见形状完全由这里决定
         .background(
@@ -417,31 +424,35 @@ struct SettingsView: View {
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(accent)
                     }
-                    Text("随机播放已选动画。")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 8)
+                Button(libraryExpansion.isExpanded(kind) ? "收起" : "选择动画") {
+                    libraryExpansion.toggle(kind)
+                }
+                .controlSize(.regular)
+                .disabled(videos.isEmpty)
                 Button("预览动画") { reminders.preview(kind) }
-                    .controlSize(.small)
+                    .controlSize(.regular)
                     .disabled(videos.isEmpty)
             }
 
-            if videos.isEmpty {
-                Text("暂无可用动画。")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-            } else {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 7), count: 5), spacing: 7) {
-                    ForEach(videos, id: \.self) { url in
-                        ReminderAnimationThumbnail(
-                            url: url,
-                            selected: reminders.isVideoSelected(url, for: kind),
-                            accent: accent,
-                            palette: palette
-                        ) {
-                            if !reminders.toggleVideo(url, for: kind) {
-                                showToast("至少保留一个动画。", duration: 2)
+            if libraryExpansion.isExpanded(kind) {
+                if videos.isEmpty {
+                    Text("暂无可用动画。")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                } else {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 7), count: 5), spacing: 7) {
+                        ForEach(videos, id: \.self) { url in
+                            ReminderAnimationThumbnail(
+                                url: url,
+                                selected: reminders.isVideoSelected(url, for: kind),
+                                accent: accent,
+                                palette: palette
+                            ) {
+                                if !reminders.toggleVideo(url, for: kind) {
+                                    showToast("至少保留一个动画。", duration: 2)
+                                }
                             }
                         }
                     }
