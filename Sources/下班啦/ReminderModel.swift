@@ -26,7 +26,35 @@ enum VideoLibrary {
         let folder = resources.appendingPathComponent("Videos/\(kind.folderName)", isDirectory: true)
         let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil,
                                                                   options: [.skipsHiddenFiles])) ?? []
-        return files.filter { extensions.contains($0.pathExtension.lowercased()) }
+        return files
+            .filter { extensions.contains($0.pathExtension.lowercased()) }
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+    }
+}
+
+/// 选择状态的纯计算：没有旧设置时全选；已被移除的素材不会留在选择中；最后一个选择不能取消。
+enum VideoSelectionState {
+    static func selectedNames(saved: [String]?, available: [URL]) -> Set<String> {
+        let names = Set(available.map(\.lastPathComponent))
+        guard let saved else { return names }
+        let selected = Set(saved).intersection(names)
+        return selected.isEmpty && !names.isEmpty ? names : selected
+    }
+
+    static func toggling(_ selected: Set<String>, name: String, available: [URL]) -> Set<String> {
+        let availableNames = Set(available.map(\.lastPathComponent))
+        guard availableNames.contains(name) else { return selected.intersection(availableNames) }
+        var next = selected.intersection(availableNames)
+        if next.contains(name) {
+            if next.count > 1 { next.remove(name) }
+        } else {
+            next.insert(name)
+        }
+        return next
+    }
+
+    static func filtered(_ available: [URL], selected: Set<String>) -> [URL] {
+        available.filter { selected.contains($0.lastPathComponent) }
     }
 }
 
@@ -54,6 +82,8 @@ final class ReminderModel: ObservableObject {
 
     /// 各类型当前可用的视频数量（设置面板显示用）
     @Published private(set) var videoCounts: [ReminderKind: Int] = [:]
+    /// 各类型已选的视频文件名；仅内部修改，供设置界面自动刷新。
+    @Published private(set) var selectedVideoNamesByKind: [ReminderKind: Set<String>] = [:]
 
     // MARK: - 外部依赖
 
@@ -89,6 +119,7 @@ final class ReminderModel: ObservableObject {
         static let offWorkFiredEnd = "reminder.offWork.firedEnd"
         static let waterAnchor = "reminder.water.anchor"
         static let eggAnchor = "reminder.egg.anchor"
+        static func selectedVideos(_ kind: ReminderKind) -> String { "reminder.\(kind.rawValue).selectedVideos" }
     }
 
     init(work: WorkTimerModel, activityStore: ActivityStore = ActivityStore()) {
@@ -103,7 +134,7 @@ final class ReminderModel: ObservableObject {
         offWorkEnabled = d.object(forKey: Keys.offWorkEnabled) as? Bool ?? true
         waterAnchor = d.object(forKey: Keys.waterAnchor) as? Date
         eggAnchor = d.object(forKey: Keys.eggAnchor) as? Date
-        refreshVideoCounts()
+        refreshVideoLibrary()
     }
 
     private func saveAnchor(_ date: Date?, _ key: String) {
@@ -130,10 +161,40 @@ final class ReminderModel: ObservableObject {
             .sink { [weak self] in self?.tick($0) }
     }
 
-    private func refreshVideoCounts() {
+    private func refreshVideoLibrary() {
         var counts: [ReminderKind: Int] = [:]
-        for kind in ReminderKind.allCases { counts[kind] = VideoLibrary.videos(kind).count }
+        var selections: [ReminderKind: Set<String>] = [:]
+        let defaults = UserDefaults.standard
+        for kind in ReminderKind.allCases {
+            let videos = VideoLibrary.videos(kind)
+            counts[kind] = videos.count
+            selections[kind] = VideoSelectionState.selectedNames(
+                saved: defaults.stringArray(forKey: Keys.selectedVideos(kind)), available: videos)
+        }
         if counts != videoCounts { videoCounts = counts }
+        if selections != selectedVideoNamesByKind { selectedVideoNamesByKind = selections }
+    }
+
+    /// 当前类别的全部内置视频，按文件名稳定排序。
+    func videos(_ kind: ReminderKind) -> [URL] { VideoLibrary.videos(kind) }
+
+    func selectedVideoNames(_ kind: ReminderKind) -> Set<String> {
+        selectedVideoNamesByKind[kind] ?? VideoSelectionState.selectedNames(saved: nil, available: videos(kind))
+    }
+
+    func isVideoSelected(_ url: URL, for kind: ReminderKind) -> Bool {
+        selectedVideoNames(kind).contains(url.lastPathComponent)
+    }
+
+    /// 切换单个动画；一类只剩最后一个已选时，保持原状并返回 false。
+    @discardableResult
+    func toggleVideo(_ url: URL, for kind: ReminderKind) -> Bool {
+        let library = videos(kind)
+        let next = VideoSelectionState.toggling(selectedVideoNames(kind), name: url.lastPathComponent, available: library)
+        guard next != selectedVideoNames(kind) else { return false }
+        selectedVideoNamesByKind[kind] = next
+        UserDefaults.standard.set(Array(next).sorted(), forKey: Keys.selectedVideos(kind))
+        return true
     }
 
     /// 设置面板里的「预览」：立即播放一个，替换正在播的气泡
@@ -237,7 +298,7 @@ final class ReminderModel: ObservableObject {
     /// - 本轮已播的文件名存在 UserDefaults，重启 App 后接着这一轮
     /// - 新加的视频自动进入当前轮；新一轮的第一个不和上一轮最后一个重复
     private func pickVideo(_ kind: ReminderKind) -> URL? {
-        let all = VideoLibrary.videos(kind)
+        let all = VideoSelectionState.filtered(videos(kind), selected: selectedVideoNames(kind))
         guard !all.isEmpty else { return nil }
         let defaults = UserDefaults.standard
         let playedKey = "reminder.\(kind.folderName).played"

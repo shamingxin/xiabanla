@@ -30,3 +30,7 @@ cp Tests/HappinessResultPresentationTests.swift "$TMP/main.swift"
 swiftc -target arm64-apple-macos13.0 -vfsoverlay "$TMP/vfs.yaml" -Xcc -ivfsoverlay -Xcc "$TMP/vfs.yaml" \
   "$TMP/main.swift" -o "$TMP/happiness-result-presentation-tests"
 "$TMP/happiness-result-presentation-tests"
+cp Tests/ReminderSelectionTests.swift "$TMP/main.swift"
+swiftc -target arm64-apple-macos13.0 -vfsoverlay "$TMP/vfs.yaml" -Xcc -ivfsoverlay -Xcc "$TMP/vfs.yaml" \
+  "$TMP/main.swift" Sources/下班啦/ReminderModel.swift Sources/下班啦/BubbleController.swift Sources/下班啦/WorkTimerModel.swift Sources/下班啦/LoginItemManager.swift Sources/下班啦/ActivityStore.swift Sources/下班啦/HappinessScore.swift -o "$TMP/reminder-selection-tests"
+"$TMP/reminder-selection-tests"

@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
+import AVFoundation
 
 /// 设置面板：参考 macOS 系统设置（菜单栏页）的分组样式
 /// - 组标题：13pt 半粗，与行内文字左对齐
@@ -128,6 +129,7 @@ struct SettingsView: View {
     @ObservedObject var model: WorkTimerModel
     @ObservedObject var reminders: ReminderModel
     @Environment(\.settingsPalette) private var palette
+    @Environment(\.themeAccent) private var accent
     /// 顶部 toast 文案，nil 时隐藏
     @State private var toast: String?
     @State private var toastToken = 0
@@ -248,14 +250,14 @@ struct SettingsView: View {
         .ignoresSafeArea()
     }
 
-    /// 显示 2.5 秒 toast，并让读屏读出来
-    private func showToast(_ text: String) {
+    /// 显示指定时长的 toast，并让读屏读出来。
+    private func showToast(_ text: String, duration: TimeInterval = 2.5) {
         toastToken += 1
         let token = toastToken
         toast = text
         NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
                              userInfo: [.announcement: text, .priority: NSAccessibilityPriorityLevel.high.rawValue])
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
             if toastToken == token { toast = nil }
         }
     }
@@ -313,7 +315,7 @@ struct SettingsView: View {
     /// 一个开关 + 开启后的上班日；开机自动开始依赖「登录时打开」，没开时给一条提示
     private var autoStartSection: some View {
         SettingsCard {
-            SettingsRow("自动计时", subtitle: "早晨打开电脑后，自动开始当天的下班倒计时。") {
+            SettingsRow("自动计时", subtitle: "开机后，今天的倒计时自动启程。") {
                 SettingsSwitch(isOn: $model.autoStartEnabled)
                     .accessibilityLabel("自动计时")
             }
@@ -325,7 +327,7 @@ struct SettingsView: View {
                 if !model.launchAtLogin {
                     SettingsDivider()
                     HStack(spacing: 8) {
-                        Text("开机后要自动开始，请先开启「登录时打开」。")
+                        Text("启用「登录时打开」后，可随开机自动开始。")
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -345,7 +347,7 @@ struct SettingsView: View {
     /// 独立于自动计时：不管自动开始还是手动点「开始上班」，到岗时间都按此回拨
     private var commuteBufferSection: some View {
         SettingsCard {
-            SettingsRow("到工位缓冲", subtitle: "开始上班时，将记录的上班时间提前一段到工位的时间。") {
+            SettingsRow("到工位缓冲", subtitle: "为抵达工位，预留一段缓冲。") {
                 SettingsSwitch(isOn: $model.commuteBufferEnabled)
                     .accessibilityLabel("到工位缓冲")
             }
@@ -371,11 +373,11 @@ struct SettingsView: View {
                                    options: ReminderModel.waterIntervals) { Self.minutesText($0) }
                 }
                 SettingsDivider()
-                SettingsRow("强制提醒", subtitle: "弹出后需选择「我喝啦」或「还不渴」。") {
+                SettingsRow("强制提醒", subtitle: "提醒将持续显示，等待你关闭。") {
                     SettingsSwitch(isOn: $reminders.waterSticky)
                 }
                 SettingsDivider()
-                videoRow(.water)
+                animationLibrary(.water)
             }
     }
 
@@ -391,7 +393,7 @@ struct SettingsView: View {
                                    options: ReminderModel.eggIntervals) { Self.minutesText($0) }
                 }
                 SettingsDivider()
-                videoRow(.egg)
+                animationLibrary(.egg)
             }
     }
 
@@ -402,17 +404,52 @@ struct SettingsView: View {
         SettingsRow("下班提醒") { SettingsSwitch(isOn: $reminders.offWorkEnabled) }
     }
 
-    /// 视频行：显示内置视频数量，可立即预览
-    private func videoRow(_ kind: ReminderKind) -> some View {
-        let count = reminders.videoCounts[kind] ?? 0
-        return SettingsRow("视频") {
-            HStack(spacing: 8) {
-                ValueText(count == 0 ? "暂无" : "\(count) 个")
-                Button("预览") { reminders.preview(kind) }
-                    .disabled(count == 0)
+    /// 紧凑动画库：已选动画才进入提醒和预览的随机池。
+    private func animationLibrary(_ kind: ReminderKind) -> some View {
+        let videos = reminders.videos(kind)
+        let selectedCount = reminders.selectedVideoNames(kind).count
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text("播放动画").font(.system(size: 13))
+                        Text("\(selectedCount) 个已选")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(accent)
+                    }
+                    Text("随机播放已选动画。")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                Button("预览动画") { reminders.preview(kind) }
+                    .controlSize(.small)
+                    .disabled(videos.isEmpty)
             }
-            .controlSize(.small)
+
+            if videos.isEmpty {
+                Text("暂无可用动画。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            } else {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 7), count: 5), spacing: 7) {
+                    ForEach(videos, id: \.self) { url in
+                        ReminderAnimationThumbnail(
+                            url: url,
+                            selected: reminders.isVideoSelected(url, for: kind),
+                            accent: accent,
+                            palette: palette
+                        ) {
+                            if !reminders.toggleVideo(url, for: kind) {
+                                showToast("至少保留一个动画。", duration: 2)
+                            }
+                        }
+                    }
+                }
+            }
         }
+        .padding(.horizontal, SettingsMetrics.inset)
+        .padding(.vertical, 12)
     }
 
 
@@ -450,6 +487,93 @@ struct SettingsView: View {
 
     private static func hoursText(_ h: Double) -> String {
         h == h.rounded() ? "\(Int(h)) 小时" : String(format: "%.1f 小时", h)
+    }
+}
+
+/// 内置提醒视频的紧凑缩略图。首帧异步解码，解码失败时保持中性占位图。
+private struct ReminderAnimationThumbnail: View {
+    let url: URL
+    let selected: Bool
+    let accent: Color
+    let palette: SettingsPalette
+    let action: () -> Void
+
+    @State private var thumbnail: NSImage?
+
+    private var displayName: String {
+        url.deletingPathExtension().lastPathComponent
+    }
+
+    var body: some View {
+        Button(action: action) {
+            ZStack(alignment: .topTrailing) {
+                thumbnailContent
+                Image(systemName: selected ? "checkmark" : "plus")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(selected ? accent.contrastingText : .secondary)
+                    .frame(width: 19, height: 19)
+                    .background(Circle().fill(selected ? accent : palette.chevronBase))
+                    .padding(5)
+            }
+            .frame(maxWidth: .infinity)
+            .aspectRatio(1.38, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(selected ? accent : palette.separator, lineWidth: selected ? 2 : 1)
+            )
+            .opacity(selected ? 1 : 0.56)
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onAppear(perform: loadThumbnail)
+        .accessibilityLabel("\(displayName)，\(selected ? "已选中" : "未选中")")
+        .accessibilityHint(selected ? "取消后至少需保留一个动画" : "加入随机播放")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    @ViewBuilder
+    private var thumbnailContent: some View {
+        if let thumbnail {
+            Image(nsImage: thumbnail)
+                .resizable()
+                .scaledToFill()
+                .overlay(alignment: .bottomLeading) {
+                    Text(displayName)
+                        .font(.system(size: 9, weight: .semibold))
+                        .lineLimit(1)
+                        .foregroundStyle(.white)
+                        .shadow(color: .black.opacity(0.85), radius: 2)
+                        .padding(5)
+                }
+        } else {
+            LinearGradient(colors: [palette.chevronBase, palette.separator], startPoint: .topLeading, endPoint: .bottomTrailing)
+                .overlay {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .overlay(alignment: .bottomLeading) {
+                    Text(displayName)
+                        .font(.system(size: 9, weight: .semibold))
+                        .lineLimit(1)
+                        .foregroundStyle(.secondary)
+                        .padding(5)
+                }
+        }
+    }
+
+    private func loadThumbnail() {
+        guard thumbnail == nil else { return }
+        let videoURL = url
+        DispatchQueue.global(qos: .userInitiated).async {
+            let generator = AVAssetImageGenerator(asset: AVAsset(url: videoURL))
+            generator.appliesPreferredTrackTransform = true
+            generator.maximumSize = CGSize(width: 240, height: 160)
+            let image = try? generator.copyCGImage(at: .zero, actualTime: nil)
+            guard let image else { return }
+            DispatchQueue.main.async { thumbnail = NSImage(cgImage: image, size: .zero) }
+        }
     }
 }
 
@@ -1415,7 +1539,7 @@ struct AboutView: View {
                 VStack(spacing: 4) {
                     Text("下班啦")
                         .font(.system(size: 22, weight: .semibold))
-                    Text("这个点，该走了")
+                    Text("把时间留给生活。")
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                 }

@@ -17,7 +17,7 @@ struct HappinessIndexView: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var state: MeasurementState = .invitation
-    @State private var invitation = HappinessCopy.openers.randomElement() ?? "本周的你，值得一张下班认证。"
+    @State private var invitation = HappinessCopy.openers.randomElement() ?? "回望本周的工作节奏。"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -48,7 +48,7 @@ struct HappinessIndexView: View {
             }
             .padding(.top, 16)
             Button(action: startMeasurement) {
-                Label("测一下本周幸福指数", systemImage: "sparkles")
+                Label("回望本周", systemImage: "sparkles")
                     .font(.system(size: 14, weight: .semibold))
                     .padding(.horizontal, 17)
                     .frame(height: 40)
@@ -57,10 +57,6 @@ struct HappinessIndexView: View {
             .tint(accent)
             .padding(.top, 22)
             .accessibilityHint("根据本周已封存的实际在岗记录计算")
-            Text("只统计已经下班的工作日；休假、漏记和今天都不算。")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .padding(.top, 14)
         }
         .frame(maxWidth: 440)
         .frame(maxWidth: .infinity)
@@ -115,9 +111,6 @@ struct HappinessIndexView: View {
                     .buttonStyle(.plain)
             }
             .frame(maxWidth: 440)
-            Text("重新测量只换一句话，不会偷偷篡改你的加班记录。")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 10)
@@ -167,9 +160,9 @@ private enum HappinessPersona: CaseIterable {
 
 private enum HappinessCopy {
     static let openers = [
-        "本周的你，值得一张下班认证。",
-        "别紧张，只测工时，不测人生。",
-        "收集一下这周被工作偷走的时间。"
+        "回望本周的工作节奏。",
+        "看看这一周，时间如何流过。",
+        "整理这一周的在岗记录。"
     ]
     static let loading = ["正在翻看本周下班记录…", "正在计算被加班偷走的时间…", "正在生成你的幸福小卡…"]
 }

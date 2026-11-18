@@ -12,7 +12,7 @@ macOS 菜单栏下班倒计时 App（SwiftUI + AppKit），功能说明见 READM
 ## 目录
 
 - `Sources/下班啦/`：WorkTimerModel（工时规则、倒欠计时、自动计时 shouldAutoStart / AutoStartGate / 到工位缓冲 autoStartArrival、深浅模式、主题色 AccentPreset、倒计时样式 CountdownStyle）、ReminderModel（提醒调度）、BubbleController（思考泡）、CountdownCardView（卡片 + CardPalette + 翻页/灵动岛/待机时钟三种数字样式）、WidgetContainer（背景渲染，图片背景已下线、注释保留）、SettingsView（侧边栏两栏设置面板 + SettingsPalette + themeAccent 环境值 + 自绘强调色开关）、TodayPanel（「今日工作」点阵屏面板 + TodayPalette + 逐位时间输入）、AppDelegate（含设置窗口高度限制 SettingsResizeDelegate）
-- `Tests/`：AutoStartTests.swift + run.sh（无 XCTest，只用 swiftc 编译成可执行文件跑断言）
+- `Tests/`：AutoStartTests.swift、ReminderSelectionTests.swift + run.sh（无 XCTest，只用 swiftc 编译成可执行文件跑断言）
 - `Assets/Videos/{喝水,彩蛋,下班}/`：内置视频，必须 640×640
 - `docs/project-context/`：跨对话任务接力（CURRENT.md / BACKLOG.md），新对话先读 CURRENT.md 再核对 git
 
@@ -29,9 +29,10 @@ macOS 菜单栏下班倒计时 App（SwiftUI + AppKit），功能说明见 READM
 - 自动计时判定测试：`./Tests/run.sh`（纯函数测试，真实锁屏/解锁时序仍需真机验收）；改自动计时逻辑必须同步更新测试
 - 自动计时安全原则：拿不准就不开始（fail-closed）。解锁证据只来自「登录项在登录后 5 分钟内拉起」或非公开通知 `com.apple.screenIsUnlocked`；未锁屏时系统不给 `CGSSessionScreenIsLocked` 键，「没有这个键」不能当成已解锁；每个工作日只检查一次（`autoStartCheckedDay`），不要恢复已删除的「离开满 4 小时」规则
 - 产品文案：设置里叫「自动计时」「到工位缓冲」「缓冲时间」「上班日」；通用里的开关叫「登录时打开」
+- 提醒动画库：喝水、彩蛋各自持久化所选文件名（UserDefaults `reminder.{water,egg}.selectedVideos`）；新/旧用户未存选择时默认全选，随机轮换和预览只从已选项取；每类至少保留一项，最后一项再次点击在设置页显示 2 秒「至少保留一个动画。」toast。缩略图取视频首帧，设置页使用 5 列紧凑网格。
 - 只在用户明确同意后提交；通常只暂存 Sources/、Assets/、Tests/、build.sh、.gitignore 和文档，推送 main；.project-handoff.json、release/ 默认忽略不提交。只有用户明确要求时，才可强制暂存指定的 release 安装包
 - 发版前改 build.sh 里的 CFBundleShortVersionString / CFBundleVersion；安装包打到 `release/下班啦-vX.Y.zip`，只保留最新版
 
 ## 当前状态
 
-v1.8.2（build 11）已公开发布：发布提交 `4f4c308`、标签和 [GitHub Release](https://github.com/shamingxin/xiabanla/releases/tag/v1.8.2) 均已公开。首次启动或升级后会一次性默认开启「登录时打开」和「自动计时」，默认上班日为周一至周五；之后仍尊重用户自行关闭或修改上班日的选择。Release 网页的 25 MB 附件上限不接受约 60 MB 安装包，因此 Release 说明链接标签内的 `release/下班啦-v1.8.2.zip`。幸福指数结果卡现为内置视频封面、手绘半星、分数、称号、统计与人格短评；「再测一次」会重播测量流程且不写入工时数据。详细进度和未实测项见 `docs/project-context/CURRENT.md`。
+v1.8.3（build 12）已公开发布：发布提交 `e76cf34`、标签 `v1.8.3`。首次启动或升级后会一次性默认开启「登录时打开」和「自动计时」，默认上班日为周一至周五；之后仍尊重用户自行关闭或修改上班日的选择。Release 网页的 25 MB 附件上限不接受约 60 MB 安装包，因此 Release 说明链接标签内的 `release/下班啦-v1.8.3.zip`。当前主线另有未发版的提醒动画库与设置文案迭代，详细进度和未实测项见 `docs/project-context/CURRENT.md`。
