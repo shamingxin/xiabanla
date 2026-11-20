@@ -20,6 +20,17 @@ struct ActivityDaySummary: Equatable {
     var total: Int { prompted + completed + deferred }
 }
 
+struct WaterIntakeSummary: Equatable {
+    let consumedMilliliters: Int
+    let goalMilliliters: Int
+
+    var remainingMilliliters: Int { max(0, goalMilliliters - consumedMilliliters) }
+    var percentage: Int {
+        guard goalMilliliters > 0 else { return 0 }
+        return min(100, max(0, Int((Double(consumedMilliliters) / Double(goalMilliliters) * 100).rounded())))
+    }
+}
+
 struct WorkSession: Equatable {
     let workday: String
     let startedAt: Date
@@ -68,6 +79,13 @@ final class ActivityStore {
           action TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS activity_events_date ON activity_events(occurred_at);
+        CREATE TABLE IF NOT EXISTS water_intake_records (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          workday TEXT NOT NULL,
+          milliliters INTEGER NOT NULL,
+          recorded_at REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS water_intake_records_workday ON water_intake_records(workday);
         CREATE TABLE IF NOT EXISTS work_sessions (
           workday TEXT PRIMARY KEY,
           started_at REAL NOT NULL,
@@ -149,6 +167,30 @@ final class ActivityStore {
                                         kind: kind, action: action))
         }
         return result
+    }
+
+    /// 每一笔饮水量独立保存，以便保留当时的真实摄入量；工作日由调用方按凌晨 5:00 边界传入。
+    func recordWater(milliliters: Int, workday: String, at date: Date = Date()) {
+        guard milliliters > 0, let database else { return }
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+        let sql = "INSERT INTO water_intake_records (workday, milliliters, recorded_at) VALUES (?, ?, ?)"
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else { return }
+        sqlite3_bind_text(statement, 1, workday, -1, sqliteTransient)
+        sqlite3_bind_int(statement, 2, Int32(milliliters))
+        sqlite3_bind_double(statement, 3, date.timeIntervalSinceReferenceDate)
+        sqlite3_step(statement)
+    }
+
+    func waterMilliliters(workday: String) -> Int {
+        guard let database else { return 0 }
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+        let sql = "SELECT COALESCE(SUM(milliliters), 0) FROM water_intake_records WHERE workday = ?"
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else { return 0 }
+        sqlite3_bind_text(statement, 1, workday, -1, sqliteTransient)
+        guard sqlite3_step(statement) == SQLITE_ROW else { return 0 }
+        return Int(sqlite3_column_int64(statement, 0))
     }
 
     /// 同一工作日允许用户补填或修正到岗时间，因此覆盖该日旧记录。

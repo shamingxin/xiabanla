@@ -33,6 +33,20 @@ let records = store.events(on: date(10, 12))
 check("按发生时间返回当天记录", records.map(\.action), [.prompted, .completed, .deferred])
 check("跨日记录不会混入", records.count, 3)
 
+// 饮水量独立于提醒回应次数，按凌晨 5:00 划分后的工作日 key 归档。
+store.recordWater(milliliters: 200, workday: "2026-11-10", at: date(10, 10))
+store.recordWater(milliliters: 100, workday: "2026-11-10", at: date(10, 14))
+store.recordWater(milliliters: 250, workday: "2026-11-11", at: date(11, 9))
+check("同一工作日累计饮水量", store.waterMilliliters(workday: "2026-11-10"), 300)
+check("快捷补记可并入饮水量", store.waterMilliliters(workday: "2026-11-11"), 250)
+check("饮水量不跨工作日混入", store.waterMilliliters(workday: "2026-11-12"), 0)
+let waterProgress = WaterIntakeSummary(consumedMilliliters: 200, goalMilliliters: 1800)
+check("饮水进度按目标计算", waterProgress.percentage, 11)
+check("饮水剩余量不为负数", waterProgress.remainingMilliliters, 1600)
+let completedWaterProgress = WaterIntakeSummary(consumedMilliliters: 2000, goalMilliliters: 1800)
+check("饮水进度最高为百分之百", completedWaterProgress.percentage, 100)
+check("完成目标后剩余量归零", completedWaterProgress.remainingMilliliters, 0)
+
 store.recordWorkStart(workday: "2026-11-10", at: date(10, 10), plannedSeconds: 9 * 3600)
 let session = store.workSession(workday: "2026-11-10")
 check("保存每日上班起点", session?.startedAt, date(10, 10))
@@ -156,6 +170,8 @@ check("按天摘要未加班显示横线", DailyPresenceMetricText(summary: Dail
     segments: [OfficePresenceSegment(id: 1, workday: "2026-11-14", startedAt: date(14, 9), endedAt: date(14, 17))],
     plannedSeconds: 9 * 3600, now: date(14, 22), isCurrentWorkday: false)).overtime, "—")
 check("在岗时间默认显示本周", ScreenTimePeriod.defaultPeriod, .week)
+check("周图只显示周一至周五", WorkweekChartLabels.selectedLabels(for: [2, 3, 4, 5, 6]), ["一", "二", "三", "四", "五"])
+check("周图按当前上班日排序", WorkweekChartLabels.selectedLabels(for: [1, 3, 5]), ["二", "四", "日"])
 
 print(failures == 0 ? "全部通过" : "失败 \(failures) 项")
 exit(failures == 0 ? 0 : 1)

@@ -11,15 +11,12 @@ struct ScreenTimeView: View {
     @ObservedObject var model: WorkTimerModel
     @ObservedObject var state: ScreenTimeState
     let activity: ActivityStore
+    @ObservedObject var reminders: ReminderModel
     @Environment(\.themeAccent) private var accent
     private let calendar = Calendar.current
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack {
-                Spacer()
-                ScreenTimeToolbar(state: state)
-            }
             ScreenTimeCard {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 3) {
@@ -38,13 +35,19 @@ struct ScreenTimeView: View {
                 }
                 if period == .week {
                     Text("每天的在岗时间").font(.system(size: 11)).foregroundStyle(.secondary)
-                    WorkWeekChart(values: weekValues, average: weekAverage, accent: accent).frame(height: 122).padding(.top, 5)
+                    WorkWeekChart(values: weekChartValues, labels: weekChartLabels, average: weekAverage, accent: accent)
+                    .frame(height: 122).padding(.top, 5)
                 }
                 HStack {
                     Text(period == .day ? "当天在岗" : "本周平均在岗").font(.system(size: 12)).foregroundStyle(.secondary)
                     Spacer()
                     Text(period == .day ? primaryDurationText : duration(weekAverage)).font(.system(size: 13, weight: .semibold, design: .rounded)).monospacedDigit()
                 }.padding(.top, 4)
+            }
+            if reminders.waterTrackingEnabled {
+                WaterIntakeCard(summary: waterIntakeSummary, day: waterFocusDay,
+                                canAdd: isCurrentWaterFocusDay,
+                                onAdd: { reminders.addWater($0) })
             }
             VStack(alignment: .leading, spacing: 0) {
                 SettingsHeader(period == .day ? "当天喝水记录" : "本周喝水记录")
@@ -84,7 +87,25 @@ struct ScreenTimeView: View {
         return calendar.date(byAdding: .day, value: weekday == 1 ? -6 : 2 - weekday, to: selectedDay)!
     }
     private var weekValues: [TimeInterval] { (0..<7).map { workSeconds(on: calendar.date(byAdding: .day, value: $0, to: weekStart)!) } }
+    private var weekChartDates: [Date] {
+        (0..<7).compactMap { offset in
+            let day = calendar.date(byAdding: .day, value: offset, to: weekStart)!
+            return model.autoStartWeekdays.contains(calendar.component(.weekday, from: day)) ? day : nil
+        }
+    }
+    private var weekChartValues: [TimeInterval] { weekChartDates.map(workSeconds(on:)) }
+    private var weekChartLabels: [String] {
+        weekChartDates.map { WorkweekChartLabels.label(for: calendar.component(.weekday, from: $0)) }
+    }
     private var weekAverage: TimeInterval { weekAverage(for: weekStart) }
+    private var waterFocusDay: Date { period == .week ? WorkTimerModel.workdayBase(for: model.now) : selectedDay }
+    private var isCurrentWaterFocusDay: Bool {
+        workdayKey(forCalendarDay: waterFocusDay) == WorkTimerModel.workdayKey(for: model.now)
+    }
+    private var waterIntakeSummary: WaterIntakeSummary {
+        WaterIntakeSummary(consumedMilliliters: activity.waterMilliliters(workday: workdayKey(forCalendarDay: waterFocusDay)),
+                           goalMilliliters: reminders.dailyWaterGoalMilliliters)
+    }
     private var dailyPresenceSummary: DailyPresenceSummary {
         let key = workdayKey(forCalendarDay: selectedDay)
         return DailyPresenceSummary.make(segments: activity.officePresenceSegments(workday: key),
@@ -179,9 +200,8 @@ struct ScreenTimeToolbar: View {
 private struct ScreenTimeCard<Content: View>: View {
     @ViewBuilder let content: Content
     @Environment(\.settingsPalette) private var palette
-    @Environment(\.colorScheme) private var scheme
     init(@ViewBuilder content: () -> Content) { self.content = content() }
-    var body: some View { VStack(alignment: .leading, spacing: 9) { content }.padding(14).background(ZStack { RoundedRectangle(cornerRadius: SettingsMetrics.cardRadius, style: .continuous).fill(palette.card); if scheme == .dark { RoundedRectangle(cornerRadius: SettingsMetrics.cardRadius, style: .continuous).fill(.black.opacity(0.42)) } }) }
+    var body: some View { VStack(alignment: .leading, spacing: 9) { content }.padding(14).background(RoundedRectangle(cornerRadius: SettingsMetrics.cardRadius, style: .continuous).fill(palette.card)) }
 }
 
 private struct DailyPresenceMetrics: View {
@@ -215,9 +235,78 @@ private struct DailyPresenceMetrics: View {
     }
 }
 
+private struct WaterIntakeCard: View {
+    let summary: WaterIntakeSummary
+    let day: Date
+    let canAdd: Bool
+    let onAdd: (Int) -> Void
+    @Environment(\.themeAccent) private var accent
+    @Environment(\.settingsPalette) private var palette
+
+    private let quickAmounts = [100, 200, 250, 330, 500]
+
+    var body: some View {
+        ScreenTimeCard {
+            HStack(alignment: .center, spacing: 18) {
+                WaterGlass(progress: Double(summary.percentage) / 100, color: accent)
+                    .frame(width: 72, height: 104)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(day.formatted(.dateTime.month().day()) + " 饮水量")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    HStack(alignment: .lastTextBaseline, spacing: 3) {
+                        Text("\(summary.consumedMilliliters)")
+                            .font(.system(size: 30, weight: .medium, design: .rounded))
+                            .monospacedDigit()
+                        Text("ml").font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
+                    }
+                    Text("完成 \(summary.percentage)% · 还差 \(summary.remainingMilliliters) ml")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            Text("快捷补记").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary).padding(.top, 3)
+            HStack(spacing: 7) {
+                ForEach(quickAmounts, id: \.self) { amount in
+                    Button { onAdd(amount) } label: {
+                        Text("+\(amount)")
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .frame(maxWidth: .infinity, minHeight: 28)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(accent)
+                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(accent.opacity(0.13)))
+                    .disabled(!canAdd)
+                    .settingsHoverFeedback(cornerRadius: 9)
+                    .accessibilityLabel("补记 \(amount) 毫升")
+                }
+            }
+        }
+    }
+}
+
+private struct WaterGlass: View {
+    let progress: Double
+    let color: Color
+
+    var body: some View {
+        GeometryReader { geo in
+            let waterHeight = max(5, geo.size.height * CGFloat(min(1, max(0, progress))))
+            ZStack(alignment: .bottom) {
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .fill(color.opacity(0.08))
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(color.opacity(0.78))
+                    .frame(height: waterHeight)
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .stroke(color.opacity(0.45), lineWidth: 1)
+            }
+        }
+    }
+}
+
 private struct WorkWeekChart: View {
-    let values: [TimeInterval]; let average: TimeInterval; let accent: Color
-    private let names = ["一", "二", "三", "四", "五", "六", "日"]
+    let values: [TimeInterval]; let labels: [String]; let average: TimeInterval; let accent: Color
     @State private var hoveredIndex: Int?
     var body: some View { GeometryReader { geo in
         let axisWidth: CGFloat = 42
@@ -254,7 +343,7 @@ private struct WorkWeekChart: View {
                                 // overlay 不参与柱状图的排版，避免提示文字把该列撑宽。
                                 .overlay(alignment: .top) {
                                     if hoveredIndex == i {
-                                        Text("周\(names[i])\n\(workDuration(values[i]))")
+                                        Text("周\(labels[i])\n\(workDuration(values[i]))")
                                             .font(.system(size: 10, weight: .medium))
                                             .multilineTextAlignment(.center)
                                             .fixedSize()
@@ -266,7 +355,7 @@ private struct WorkWeekChart: View {
                                     }
                                 }
                                 .animation(.easeOut(duration: 0.14), value: hoveredIndex == i)
-                            Text(names[i]).font(.system(size: 10)).foregroundStyle(.secondary)
+                            Text(labels[i]).font(.system(size: 10)).foregroundStyle(.secondary)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                         .contentShape(Rectangle())

@@ -79,6 +79,12 @@ struct ReminderLibraryExpansionState {
     }
 }
 
+enum WaterTrackingState {
+    static func isEnabled(waterEnabled: Bool, sticky: Bool) -> Bool {
+        waterEnabled && sticky
+    }
+}
+
 /// 喝水提醒 + 小彩蛋：保存设置，并每秒检查是否到了该弹气泡的时间
 final class ReminderModel: ObservableObject {
 
@@ -86,6 +92,8 @@ final class ReminderModel: ObservableObject {
 
     static let waterIntervals = [5, 10, 15, 30, 45, 60, 90, 120]
     static let eggIntervals = [5, 10, 15, 20, 30, 45, 60, 90, 120]
+    static let waterGoalOptions = [1200, 1500, 1800, 2000, 2500, 3000]
+    static let waterServingOptions = [100, 150, 200, 250, 330, 500]
     /// 触发点过了多久以内仍会补弹（例如正被另一个气泡占着）；超过就跳过，避免启动时补一堆旧提醒
     static let fireWindow: TimeInterval = 120
 
@@ -95,6 +103,9 @@ final class ReminderModel: ObservableObject {
     @Published var waterIntervalMinutes: Int { didSet { save(waterIntervalMinutes, Keys.waterInterval) } }
     /// 常驻提醒：喝水动画循环播放，点 × 才关闭；默认开启
     @Published var waterSticky: Bool { didSet { save(waterSticky, Keys.waterSticky) } }
+    /// 仅强制提醒开启时使用；每次「我喝啦」都会按此值累加。
+    @Published var dailyWaterGoalMilliliters: Int { didSet { save(dailyWaterGoalMilliliters, Keys.dailyWaterGoal) } }
+    @Published var waterServingMilliliters: Int { didSet { save(waterServingMilliliters, Keys.waterServing) } }
 
     @Published var eggEnabled: Bool { didSet { save(eggEnabled, Keys.eggEnabled) } }
     @Published var eggIntervalMinutes: Int { didSet { save(eggIntervalMinutes, Keys.eggInterval) } }
@@ -105,6 +116,10 @@ final class ReminderModel: ObservableObject {
     @Published private(set) var videoCounts: [ReminderKind: Int] = [:]
     /// 各类型已选的视频文件名；仅内部修改，供设置界面自动刷新。
     @Published private(set) var selectedVideoNamesByKind: [ReminderKind: Set<String>] = [:]
+
+    var waterTrackingEnabled: Bool {
+        WaterTrackingState.isEnabled(waterEnabled: waterEnabled, sticky: waterSticky)
+    }
 
     // MARK: - 外部依赖
 
@@ -133,6 +148,8 @@ final class ReminderModel: ObservableObject {
         static let waterEnabled = "reminder.water.enabled"
         static let waterInterval = "reminder.water.interval"
         static let waterSticky = "reminder.water.sticky"
+        static let dailyWaterGoal = "reminder.water.dailyGoalMilliliters"
+        static let waterServing = "reminder.water.servingMilliliters"
         static let eggEnabled = "reminder.egg.enabled"
         static let eggInterval = "reminder.egg.interval"
         static let offWorkEnabled = "reminder.offWork.enabled"
@@ -150,6 +167,8 @@ final class ReminderModel: ObservableObject {
         waterEnabled = d.bool(forKey: Keys.waterEnabled)
         waterIntervalMinutes = d.object(forKey: Keys.waterInterval) as? Int ?? 45
         waterSticky = d.object(forKey: Keys.waterSticky) as? Bool ?? true
+        dailyWaterGoalMilliliters = d.object(forKey: Keys.dailyWaterGoal) as? Int ?? 1800
+        waterServingMilliliters = d.object(forKey: Keys.waterServing) as? Int ?? 200
         eggEnabled = d.bool(forKey: Keys.eggEnabled)
         eggIntervalMinutes = d.object(forKey: Keys.eggInterval) as? Int ?? 30
         offWorkEnabled = d.object(forKey: Keys.offWorkEnabled) as? Bool ?? true
@@ -305,6 +324,14 @@ final class ReminderModel: ObservableObject {
     func respondToWater(_ action: ActivityAction) {
         guard action == .completed || action == .deferred else { return }
         activityStore.record(kind: .water, action: action)
+        if action == .completed { addWater() }
+    }
+
+    /// 强制提醒开启时才允许把喝水量写入统计；手动补记也共用此入口。
+    func addWater(_ milliliters: Int? = nil, at date: Date = Date()) {
+        guard waterTrackingEnabled else { return }
+        let amount = milliliters ?? waterServingMilliliters
+        activityStore.recordWater(milliliters: amount, workday: WorkTimerModel.workdayKey(for: date), at: date)
     }
 
     /// 常驻喝水被关掉（点 × 或被下班动画顶替）：喝水、彩蛋都从这一刻重新计时

@@ -16,6 +16,17 @@ swiftc -parse-as-library -O -target arm64-apple-macos13.0 \
   Sources/下班啦/*.swift -o build/下班啦-bin
 
 APP="build/下班啦.app"
+# 不能在运行中删除 .app：Launch Services 会把旧进程当作损坏包而直接终止。
+# 先正常退出，构建完成后再由系统启动器拉起新版。
+WAS_RUNNING=0
+if pgrep -x "下班啦" >/dev/null 2>&1; then
+  WAS_RUNNING=1
+  pkill -x "下班啦"
+  for _ in {1..20}; do
+    pgrep -x "下班啦" >/dev/null 2>&1 || break
+    sleep 0.1
+  done
+fi
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 mv build/下班啦-bin "$APP/Contents/MacOS/下班啦"
@@ -32,8 +43,8 @@ cat > "$APP/Contents/Info.plist" << PLIST
   <key>CFBundleIdentifier</key><string>com.shasha.xiabanla</string>
   <key>CFBundleExecutable</key><string>下班啦</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.8.5</string>
-  <key>CFBundleVersion</key><string>14</string>
+  <key>CFBundleShortVersionString</key><string>1.8.6</string>
+  <key>CFBundleVersion</key><string>15</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>CFBundleIconFile</key><string>AppIcon</string>
@@ -42,3 +53,8 @@ PLIST
 codesign --force --sign - "$APP"
 rm -rf build/overlay build/compile.log
 echo "构建完成: $PWD/$APP"
+if [[ "$WAS_RUNNING" == "1" ]]; then
+  if ! open "$APP"; then
+    echo "新版未能自动显示；请从 build/下班啦.app 手动打开。" >&2
+  fi
+fi

@@ -9,6 +9,20 @@ enum ScreenTimePeriod: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+/// 周图从周一开始排序，并只显示用户选作上班日的日期。
+enum WorkweekChartLabels {
+    private static let weekdaysStartingMonday = [2, 3, 4, 5, 6, 7, 1]
+    private static let labels = [2: "一", 3: "二", 4: "三", 5: "四", 6: "五", 7: "六", 1: "日"]
+
+    static func selectedLabels(for selectedWeekdays: Set<Int>) -> [String] {
+        weekdaysStartingMonday.compactMap { selectedWeekdays.contains($0) ? labels[$0] : nil }
+    }
+
+    static func label(for weekday: Int) -> String {
+        labels[weekday] ?? ""
+    }
+}
+
 /// 在岗时间展示规则与 SwiftUI 视图分离，保证实际在岗记录的优先级可独立测试。
 enum ScreenTimeDuration {
     static func seconds(for presence: OfficePresenceSession?, plannedSeconds: TimeInterval,

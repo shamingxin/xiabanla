@@ -10,7 +10,7 @@ import AVFoundation
 /// 设置面板侧边栏分区：对应系统设置左侧列表
 enum SettingsSidebarItem: String, CaseIterable, Identifiable {
     case workHours = "工作时长"
-    case reminderAnimations = "提醒动画"
+    case reminderAnimations = "提醒"
     case general = "通用"
     case screenTime = "在岗时间"
     case happinessIndex = "幸福指数"
@@ -54,6 +54,7 @@ struct SettingsSidebar: View {
     @Binding var selection: SettingsSidebarItem
     @Environment(\.settingsPalette) private var palette
     @Environment(\.themeAccent) private var accent
+    @State private var hoveredItem: SettingsSidebarItem?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -105,11 +106,12 @@ struct SettingsSidebar: View {
             .frame(height: 32)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(selected ? accent : Color.clear)
+                    .fill(selected ? accent : (hoveredItem == item ? accent.opacity(0.14) : Color.clear))
             )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .onHover { hovering in hoveredItem = hovering ? item : (hoveredItem == item ? nil : hoveredItem) }
         .accessibilityLabel(item.rawValue)
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
@@ -150,6 +152,9 @@ struct SettingsView: View {
                     Text(selectedSection.rawValue)
                         .font(.system(size: 15, weight: .semibold))
                     Spacer()
+                    if selectedSection == .screenTime {
+                        ScreenTimeToolbar(state: screenTimeState)
+                    }
                 }
                     .padding(.horizontal, SettingsMetrics.contentPadding)
                     .frame(height: SettingsMetrics.toolbarHeight)
@@ -162,15 +167,13 @@ struct SettingsView: View {
                             todaySection
                             workSection
                         case .screenTime:
-                            ScreenTimeView(model: model, state: screenTimeState, activity: reminders.activityStore)
+                            ScreenTimeView(model: model, state: screenTimeState, activity: reminders.activityStore, reminders: reminders)
                         case .happinessIndex:
                             HappinessIndexView(activity: reminders.activityStore) {
                                 selectedSection = .screenTime
                             }
                         case .reminderAnimations:
-                            SettingsCard { waterRows }
-                            SettingsCard { eggRows }
-                            SettingsCard { offWorkRows }
+                            reminderSections
                         case .general:
                             SettingsCard {
                                 SettingsRow("登录时打开") {
@@ -370,29 +373,64 @@ struct SettingsView: View {
 
     // MARK: - 喝水提醒
 
-    @ViewBuilder
-    private var waterRows: some View {
-            SettingsRow("喝水提醒") { SettingsSwitch(isOn: $reminders.waterEnabled) }
-            if reminders.waterEnabled {
-                SettingsDivider()
-                SettingsRow("提醒间隔") {
-                    SettingsPicker("提醒间隔", selection: $reminders.waterIntervalMinutes,
-                                   options: ReminderModel.waterIntervals) { Self.minutesText($0) }
-                }
-                SettingsDivider()
-                SettingsRow("强制提醒", subtitle: "提醒将持续显示，等待你关闭。") {
-                    SettingsSwitch(isOn: $reminders.waterSticky)
-                }
-                SettingsDivider()
-                animationLibrary(.water)
-            }
+    private var reminderSections: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            waterReminderSection
+            SettingsSection("放松提醒") { eggRows }
+            SettingsSection("下班提醒") { offWorkRows }
+        }
     }
 
-    // MARK: - 小彩蛋
+    private var waterReminderSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsHeader("喝水提醒")
+            VStack(spacing: 10) {
+                SettingsCard { waterRegularRows }
+                if reminders.waterEnabled {
+                    SettingsCard { waterStickyRows }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var waterRegularRows: some View {
+        SettingsRow("动画提醒") { SettingsSwitch(isOn: $reminders.waterEnabled) }
+        if reminders.waterEnabled {
+            SettingsDivider()
+            SettingsRow("提醒间隔") {
+                SettingsPicker("提醒间隔", selection: $reminders.waterIntervalMinutes,
+                               options: ReminderModel.waterIntervals) { Self.minutesText($0) }
+            }
+            SettingsDivider()
+            animationLibrary(.water)
+        }
+    }
+
+    @ViewBuilder
+    private var waterStickyRows: some View {
+        SettingsRow("强制提醒", subtitle: "提醒将持续显示，等待你关闭。") {
+            SettingsSwitch(isOn: $reminders.waterSticky)
+        }
+        if reminders.waterSticky {
+            SettingsDivider()
+            SettingsRow("每日饮水目标") {
+                SettingsPicker("每日饮水目标", selection: $reminders.dailyWaterGoalMilliliters,
+                               options: ReminderModel.waterGoalOptions) { "\($0) ml" }
+            }
+            SettingsDivider()
+            SettingsRow("单次饮水量") {
+                SettingsPicker("单次饮水量", selection: $reminders.waterServingMilliliters,
+                               options: ReminderModel.waterServingOptions) { "\($0) ml" }
+            }
+        }
+    }
+
+    // MARK: - 放松提醒
 
     @ViewBuilder
     private var eggRows: some View {
-            SettingsRow("随机彩蛋") { SettingsSwitch(isOn: $reminders.eggEnabled) }
+            SettingsRow("动画提醒") { SettingsSwitch(isOn: $reminders.eggEnabled) }
             if reminders.eggEnabled {
                 SettingsDivider()
                 SettingsRow("提醒间隔") {
@@ -408,13 +446,20 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var offWorkRows: some View {
-        SettingsRow("下班提醒") { SettingsSwitch(isOn: $reminders.offWorkEnabled) }
+        SettingsRow("动画提醒") { SettingsSwitch(isOn: $reminders.offWorkEnabled) }
+        if reminders.offWorkEnabled {
+            SettingsDivider()
+            animationLibrary(.offWork)
+        }
     }
 
     /// 紧凑动画库：已选动画才进入提醒和预览的随机池。
     private func animationLibrary(_ kind: ReminderKind) -> some View {
         let videos = reminders.videos(kind)
         let selectedCount = reminders.selectedVideoNames(kind).count
+        // SettingsView 自身在注入环境值的同一层级，读取到的是环境默认色；
+        // 这里直接读已持久化的主题色，保证“已选”和缩略图选中态随主题色同步。
+        let accent = model.accentColor
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -431,9 +476,11 @@ struct SettingsView: View {
                 }
                 .controlSize(.regular)
                 .disabled(videos.isEmpty)
+                .settingsHoverFeedback(cornerRadius: 7)
                 Button("预览动画") { reminders.preview(kind) }
                     .controlSize(.regular)
                     .disabled(videos.isEmpty)
+                    .settingsHoverFeedback(cornerRadius: 7)
             }
 
             if libraryExpansion.isExpanded(kind) {
@@ -671,6 +718,34 @@ struct SettingsCard<Content: View>: View {
     }
 }
 
+/// 设置面板的轻量悬停反馈：仅提示可点击，不改变布局或主题层级。
+private struct SettingsHoverFeedback: ViewModifier {
+    @Environment(\.themeAccent) private var accent
+    @Environment(\.isEnabled) private var isEnabled
+    let cornerRadius: CGFloat
+    @State private var hovering = false
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(isEnabled && hovering ? accent.opacity(0.12) : .clear)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(isEnabled && hovering ? accent.opacity(0.38) : .clear, lineWidth: 0.8)
+            )
+            .onHover { hovering = isEnabled && $0 }
+            .animation(.easeOut(duration: 0.12), value: hovering)
+    }
+}
+
+extension View {
+    func settingsHoverFeedback(cornerRadius: CGFloat = 8) -> some View {
+        modifier(SettingsHoverFeedback(cornerRadius: cornerRadius))
+    }
+}
+
 /// 一行：左侧标签，右侧控件
 /// 可选副标题：标签下方一行次级色说明，参考系统设置「接入电源时启动」
 struct SettingsRow<Trailing: View>: View {
@@ -746,6 +821,10 @@ struct SettingsPicker<Value: Hashable>: View {
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .fill(Color.primary.opacity(pressed ? 0.12 : (hovering ? 0.07 : 0)))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .strokeBorder(hovering ? Color.primary.opacity(0.18) : .clear, lineWidth: 0.8)
         )
         .animation(.easeOut(duration: 0.12), value: hovering)
         .animation(.easeOut(duration: 0.08), value: pressed)
@@ -926,6 +1005,7 @@ struct AccentSwitchStyle: ToggleStyle {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .settingsHoverFeedback(cornerRadius: 10)
         .accessibilityElement()
         .accessibilityAddTraits(.isButton)
         .accessibilityValue(on ? "开" : "关")
@@ -957,6 +1037,7 @@ struct WeekdayPicker: View {
                         .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
+                .settingsHoverFeedback(cornerRadius: 12)
                 .accessibilityLabel("周" + day.title)
                 .accessibilityValue(on ? "已选" : "未选")
                 .accessibilityAddTraits(on ? .isSelected : [])
@@ -1016,7 +1097,7 @@ struct SettingsPalette {
     // 底色用中性冷灰，不再用偏暖的 #222120，避免和壁纸色调打架
     static let dark = SettingsPalette(
         window: Color(red: 0x1F / 255, green: 0x20 / 255, blue: 0x23 / 255),
-        card: Color.white.opacity(0.055),
+        card: Color.white.opacity(0.04),
         separator: Color.white.opacity(0.08),
         chevronBase: Color.white.opacity(0.1),
         toast: Color(white: 0.24),
