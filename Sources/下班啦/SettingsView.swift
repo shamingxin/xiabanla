@@ -130,31 +130,28 @@ extension Color {
 struct SettingsView: View {
     @ObservedObject var model: WorkTimerModel
     @ObservedObject var reminders: ReminderModel
+    @ObservedObject var navigation: SettingsNavigationState
+    @ObservedObject var screenTimeState: ScreenTimeState
     @Environment(\.settingsPalette) private var palette
     @Environment(\.themeAccent) private var accent
     /// 顶部 toast 文案，nil 时隐藏
     @State private var toast: String?
     @State private var toastToken = 0
     /// 当前选中的侧边栏分区，默认「工作时长」
-    @State private var selectedSection: SettingsSidebarItem = .workHours
     /// 动画库仅在当前提醒页会话中展开；离开该分区即恢复收起。
     @State private var libraryExpansion = ReminderLibraryExpansionState()
     /// 在岗时间的筛选状态由内容区与日期控制组共享。
-    @StateObject private var screenTimeState = ScreenTimeState()
 
     var body: some View {
         HStack(spacing: 0) {
-            SettingsSidebar(selection: $selectedSection)
+            SettingsSidebar(selection: $navigation.selectedSection)
             VStack(spacing: 0) {
                 // 工具栏行：标题和窗口红黄绿按钮同一水平线，参考系统设置「外观」页顶部。
                 // 可交互控件不能放在这个系统标题栏拖拽区域，否则鼠标事件会被窗口拖动手势吞掉。
                 HStack(spacing: 12) {
-                    Text(selectedSection.rawValue)
+                    Text(navigation.selectedSection.rawValue)
                         .font(.system(size: 15, weight: .semibold))
                     Spacer()
-                    if selectedSection == .screenTime {
-                        ScreenTimeToolbar(state: screenTimeState)
-                    }
                 }
                     .padding(.horizontal, SettingsMetrics.contentPadding)
                     .frame(height: SettingsMetrics.toolbarHeight)
@@ -162,7 +159,7 @@ struct SettingsView: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
-                        switch selectedSection {
+                        switch navigation.selectedSection {
                         case .workHours:
                             todaySection
                             workSection
@@ -170,7 +167,7 @@ struct SettingsView: View {
                             ScreenTimeView(model: model, state: screenTimeState, activity: reminders.activityStore, reminders: reminders)
                         case .happinessIndex:
                             HappinessIndexView(activity: reminders.activityStore) {
-                                selectedSection = .screenTime
+                                navigation.selectedSection = .screenTime
                             }
                         case .reminderAnimations:
                             reminderSections
@@ -220,7 +217,7 @@ struct SettingsView: View {
         // 宽度固定；高度跟随窗口（用户可上下拖动），由 AppDelegate 限制最小/最大高度
         .frame(width: SettingsMetrics.windowWidth)
         .frame(minHeight: SettingsMetrics.minWindowHeight, maxHeight: .infinity)
-        .onChange(of: selectedSection) { section in
+        .onChange(of: navigation.selectedSection) { section in
             if section != .reminderAnimations {
                 libraryExpansion.collapseAll()
             }
@@ -342,7 +339,7 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 8)
-                        Button("前往通用") { selectedSection = .general }
+                        Button("前往通用") { navigation.selectedSection = .general }
                             .buttonStyle(.plain)
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(.primary)

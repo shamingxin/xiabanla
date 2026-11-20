@@ -5,6 +5,10 @@ final class ScreenTimeState: ObservableObject {
     @Published var selectedDate = WorkTimerModel.workdayBase(for: Date())
 }
 
+final class SettingsNavigationState: ObservableObject {
+    @Published var selectedSection: SettingsSidebarItem = .workHours
+}
+
 /// 仅统计下班啦记录的工作与喝水行为，不读取系统 App 使用时间。
 struct ScreenTimeView: View {
     typealias Period = ScreenTimePeriod

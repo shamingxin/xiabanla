@@ -72,10 +72,11 @@ check("下班提醒接入动画库", settingsSource.contains("animationLibrary(.
 check("深色模块底色使用更浅的叠层", settingsSource.contains("card: Color.white.opacity(0.04)"))
 
 let screenTimeSource = try! String(contentsOfFile: "Sources/下班啦/ScreenTimeView.swift", encoding: .utf8)
+let appDelegateSource = try! String(contentsOfFile: "Sources/下班啦/AppDelegate.swift", encoding: .utf8)
 check("在岗卡片不再叠加旧的深黑遮罩", !screenTimeSource.contains(".black.opacity(0.42)"))
 check("在岗周图使用当前工作日标签", screenTimeSource.contains("labels: weekChartLabels"))
 check("在岗页不再在内容区放日期工具栏", !screenTimeSource.contains("HStack {\n                Spacer()\n                ScreenTimeToolbar"))
-check("在岗日期工具栏位于设置标题栏", settingsSource.contains("if selectedSection == .screenTime {"))
+check("在岗日期工具栏位于原生标题栏", appDelegateSource.contains("NSTitlebarAccessoryViewController"))
 
 let expectedWaterVideos = ["喝咖啡.mp4", "喝水.mp4"]
 let expectedRestVideos = ["伸懒腰.mp4", "偷瞄.mp4", "发呆.mp4", "吃吃吃吃.mp4", "吃我一肥皂.mp4", "休息-听歌.mp4", "呜呜呜.mp4", "哭哭.mp4", "啊？.mp4", "嘻嘻.mp4", "嘻嘻嘻.mp4", "困.mp4", "好累.mp4", "妈咪妈咪哄.mp4", "幻境.mp4", "开车.mp4", "彭扔.mp4", "想睡觉.mp4", "抠鼻子.mp4", "抽烟1.mp4", "抽烟2.mp4", "猫猫车.mp4", "玩电脑.mp4", "被子在控制我.mp4", "钱包没钱了.mp4"]

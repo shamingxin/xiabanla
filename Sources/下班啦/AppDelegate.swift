@@ -23,6 +23,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var popover: WidgetPanel?
     private var desktop: WidgetWindow?
     private var settingsWindow: NSWindow?
+    private let settingsNavigation = SettingsNavigationState()
+    private let screenTimeState = ScreenTimeState()
     /// 设置窗口代理：拖动时限制高度（NSWindow.delegate 是弱引用，这里强持有）
     private let settingsResizeDelegate = SettingsResizeDelegate()
     private var cancellables = Set<AnyCancellable>()
@@ -221,7 +223,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         closePopover()
         if settingsWindow == nil {
             // 窗口尺寸只由窗口决定：hosting view 不向窗口回报内容尺寸，避免窗口跟随 SwiftUI 内容变化造成布局循环崩溃
-            let hosting = NSHostingView(rootView: SettingsView(model: model, reminders: reminders))
+            let hosting = NSHostingView(rootView: SettingsView(model: model, reminders: reminders,
+                                                               navigation: settingsNavigation,
+                                                               screenTimeState: screenTimeState))
             hosting.sizingOptions = []
             let savedHeight = UserDefaults.standard.double(forKey: Self.settingsHeightKey)
             let height = savedHeight > 0
@@ -257,6 +261,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             toolbar.showsBaselineSeparator = false
             window.toolbar = toolbar
             window.toolbarStyle = .unified
+            let toolbarAccessory = NSTitlebarAccessoryViewController()
+            let toolbarView = NSHostingView(rootView: ScreenTimeToolbarTitlebarAccessory(
+                navigation: settingsNavigation, screenTimeState: screenTimeState
+            ))
+            toolbarView.frame.size = toolbarView.fittingSize
+            toolbarAccessory.view = toolbarView
+            toolbarAccessory.layoutAttribute = .right
+            window.addTitlebarAccessoryViewController(toolbarAccessory)
             window.isReleasedWhenClosed = false
             applySettingsAppearance(window)
             // 切换背景时，标题栏和系统控件（开关、菜单）跟着变深/浅

@@ -43,8 +43,8 @@ cat > "$APP/Contents/Info.plist" << PLIST
   <key>CFBundleIdentifier</key><string>com.shasha.xiabanla</string>
   <key>CFBundleExecutable</key><string>下班啦</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.8.6</string>
-  <key>CFBundleVersion</key><string>15</string>
+  <key>CFBundleShortVersionString</key><string>1.8.7</string>
+  <key>CFBundleVersion</key><string>16</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>CFBundleIconFile</key><string>AppIcon</string>
