@@ -4,7 +4,7 @@ macOS 菜单栏下班倒计时 App（SwiftUI + AppKit），功能说明见 READM
 
 ## 运行
 
-- 构建：`./build.sh` → `build/下班啦.app`；改完代码必须重新构建，并 `pkill -x 下班啦 && open build/下班啦.app` 重启，否则用户看到的是旧进程
+- 构建：`./build.sh` → `build/下班啦.app`；脚本会先正常停止运行中的旧版、完成后启动新版，不要在构建前手动删除运行中的 `.app`
 - 没有 Xcode，只有 Command Line Tools：不能用 `#Preview`；build.sh 用 vfsoverlay 屏蔽 CLT 里重复的 module.modulemap
 - 没有屏幕录制权限：界面效果靠用户截图；需要自查时写临时 main.swift，用 `NSHostingView.cacheDisplay` 离屏渲染取像素，用完删除
 - `osascript` 被禁用；本机 Python 的 PIL 架构不匹配，读 PNG 像素用纯 Python zlib 解码
@@ -19,7 +19,7 @@ macOS 菜单栏下班倒计时 App（SwiftUI + AppKit），功能说明见 READM
 ## 约定
 
 - 设置窗口两栏布局，宽度固定 678，高度可上下拖动 500–1000、默认 680、松手后记住（`settingsWindowHeight`）；高度限制必须放在 `SettingsResizeDelegate.windowWillResize`，`contentMinSize/contentMaxSize` 在窗口显示后会被 NSHostingView 清零（侧边栏浮起面板内缩 8 + 宽 190，右内容区 480 宽，尺寸常量在 `SettingsMetrics`），hosting 的 `sizingOptions = []`，不要改成随内容自适应（会布局循环闪退）；窗口 fullSizeContentView + 空 unified 工具栏，红黄绿按钮落在侧边栏面板内，右侧顶部 15pt 半粗标题和按钮同一行
-- 设置面板分七个侧边栏分区，顺序为：「工作时长」（今日工作+上班规则，默认选中）、「提醒动画」（喝水/彩蛋/下班提醒）、「通用」（登录项）、「在岗时间」（公司电脑上的实际在岗片段）、「幸福指数」、「外观」（深浅模式 + 主题色一张卡片；下方「倒计时样式」独立成组，墙纸式 3 列预览网格 `CountdownStylePreview`，新增样式加枚举项 + 补预览画法即可）、「关于」（直接在内容区显示，不弹窗）；侧边栏每项是彩色圆角方块图标（分类色固定），选中态主题色实底，文字黑/白按底色亮度自动取（`Color.contrastingText`）
+- 设置面板分七个侧边栏分区，顺序为：「工作时长」（今日工作+上班规则，默认选中）、「提醒」（喝水／放松／下班提醒）、「通用」（登录项）、「在岗时间」（公司电脑上的实际在岗片段）、「幸福指数」、「外观」（深浅模式 + 主题色一张卡片；下方「倒计时样式」独立成组，墙纸式 3 列预览网格 `CountdownStylePreview`，新增样式加枚举项 + 补预览画法即可）、「关于」（直接在内容区显示，不弹窗）；侧边栏每项是彩色圆角方块图标（分类色固定），选中态主题色实底，文字黑/白按底色亮度自动取（`Color.contrastingText`）
 - 配色走环境值：卡片用 `\.cardPalette`，设置面板用 `\.settingsPalette`，强调色用 `\.themeAccent`（在 SettingsView 根部由 `model.accentColor` 注入），不要写死 `Color.white` 或写死十六进制强调色
 - UserDefaults key 改名要兼容老用户（如 `defaultStartTime` 沿用）
 - **产品文案（2026-11 改版后）**：原「主题色」（黑/白/图片背景）现在叫「深浅模式」，只剩「浅色」「深色」两态，样式是系统设置「外观」同款窗口缩略图（`AppearanceThumbnail`）+ 下方文字，选中态主题色描边，上传图片功能已下线（代码保留注释，未删除，见 `WidgetContainer.customImage`）；新增「主题色」控制开关/数字等强调色（5 预设：荧光绿 #39FF14、莱茵蓝 #0057FF、黄 #FED501、粉 #FF6B9D、红 #FF3B30 + 自定义 hex 输入）；新增「倒计时样式」控制主卡片数字呈现（翻页 `flip` 现状 / 灵动岛 `dynamicIsland` 粗体数字+spring 果冻动画），只影响 CountdownCardView，不影响「今日工作」点阵面板
@@ -29,10 +29,10 @@ macOS 菜单栏下班倒计时 App（SwiftUI + AppKit），功能说明见 READM
 - 自动计时判定测试：`./Tests/run.sh`（纯函数测试，真实锁屏/解锁时序仍需真机验收）；改自动计时逻辑必须同步更新测试
 - 自动计时安全原则：拿不准就不开始（fail-closed）。解锁证据只来自「登录项在登录后 5 分钟内拉起」或非公开通知 `com.apple.screenIsUnlocked`；未锁屏时系统不给 `CGSSessionScreenIsLocked` 键，「没有这个键」不能当成已解锁；每个工作日只检查一次（`autoStartCheckedDay`），不要恢复已删除的「离开满 4 小时」规则
 - 产品文案：设置里叫「自动计时」「到工位缓冲」「缓冲时间」「上班日」；通用里的开关叫「登录时打开」
-- 提醒动画库：喝水、彩蛋各自持久化所选文件名（UserDefaults `reminder.{water,egg}.selectedVideos`）；新/旧用户未存选择时默认全选，随机轮换和预览只从已选项取；每类至少保留一项，最后一项再次点击在设置页显示 2 秒「至少保留一个动画。」toast。动画库默认收起，离开「提醒动画」页后再次进入仍收起；右侧为 22pt 的「选择动画 / 预览动画」按钮，点击选择后显示 5 列缩略图网格，按钮改为「收起」。
+- 提醒动画库：喝水、放松、下班各自持久化所选文件名（UserDefaults `reminder.{water,egg,offWork}.selectedVideos`）；新/旧用户未存选择时默认全选，随机轮换和预览只从已选项取；每类至少保留一项，最后一项再次点击在设置页显示 2 秒「至少保留一个动画。」toast。动画库默认收起，离开「提醒」页后再次进入仍收起；右侧为 22pt 的「选择动画 / 预览动画」按钮，点击选择后显示 5 列缩略图网格，按钮改为「收起」。
 - 只在用户明确同意后提交；通常只暂存 Sources/、Assets/、Tests/、build.sh、.gitignore 和文档，推送 main；.project-handoff.json、release/ 默认忽略不提交。只有用户明确要求时，才可强制暂存指定的 release 安装包
-- 发版前改 build.sh 里的 CFBundleShortVersionString / CFBundleVersion；安装包打到 `release/下班啦-vX.Y.zip`，只保留最新版
+- 发版前改 build.sh 里的 CFBundleShortVersionString / CFBundleVersion；完整安装包打到 `release/下班啦-vX.Y.zip`。GitHub 仓库单文件超过 100 MB 时，保留完整包在本地，并将低于限制的分卷及合并说明随用户明确授权发布。
 
 ## 当前状态
 
-v1.8.5（build 14）已推送：发布提交与标签为 `a9ff5e9` / `v1.8.5`，包含提醒动画库默认收起、22pt 操作按钮、设置侧边栏重排，以及幸福指数视频按 1:1 原始比例展示。安装包为标签内的 `release/下班啦-v1.8.5.zip`；GitHub 网页 Release 待浏览器登录后创建。首次启动或升级后会一次性默认开启「登录时打开」和「自动计时」，默认上班日为周一至周五；之后仍尊重用户自行关闭或修改上班日的选择。Release 网页的 25 MB 附件上限不接受约 60 MB 安装包，因此 Release 说明链接标签内的安装包。
+v1.8.6（build 15）已推送：功能提交与标签为 `c7e5463` / `v1.8.6`，安装包分卷与合并说明在 `86692c5`。包含提醒页分组与下班动画选择、饮水量统计和快捷补记、在岗时间工作日筛选及日期工具栏、设置 hover 与主题色统一、2 个喝水和 25 个放松动画素材。完整安装包为本地 `release/下班啦-v1.8.6.zip`（144 MB）；仓库内提供低于 100 MB 限制的分卷与 `release/README-v1.8.6.md` 合并说明。首次启动或升级后会一次性默认开启「登录时打开」和「自动计时」，默认上班日为周一至周五；之后仍尊重用户自行关闭或修改上班日的选择。
