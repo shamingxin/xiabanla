@@ -28,7 +28,13 @@ macOS 菜单栏下班倒计时 App：菜单栏显示剩余时间，点开是翻�
 
 ## 视频素材
 
-放在 `Assets/Videos/{喝水,彩蛋,下班}/`，要求 **640×640 正方形 mp4**（非正方形会被裁边），重新打包后生效，使用者不能自行上传。
+提醒动画放在 `Assets/Videos/{喝水,彩蛋,下班}/`，幸福指数封面动画放在 `Assets/Videos/幸福指数/`。内置视频采用 **640×640 正方形 H.264 MP4**，随 App 离线播放。更新已有提醒动画时保留文件名，以便沿用用户的勾选记录。
+
+新增动画可从 640×640 原片用以下参数压缩，保留原帧率，移除静音播放用不到的音轨。将输出放入对应目录后重新构建。
+
+```sh
+ffmpeg -i 原片.mp4 -map 0:v:0 -an -c:v libx264 -preset medium -crf 23 -movflags +faststart 输出.mp4
+```
 
 ## 构建与发版
 
@@ -37,7 +43,7 @@ macOS 菜单栏下班倒计时 App：菜单栏显示剩余时间，点开是翻�
 ```sh
 ./build.sh          # 编译打包到 build/下班啦.app（arm64、macOS 13+、ad-hoc 签名；旧版运行中会先正常退出、完成后自动启动新版）
 ./Tests/run.sh      # 自动计时、活动数据与提醒浮层布局测试（真实锁屏/解锁仍需真机验证）
-mkdir -p release && ditto -c -k --sequesterRsrc --keepParent build/下班啦.app release/下班啦-v1.9.2.zip
+mkdir -p release && ditto -c -k --sequesterRsrc --keepParent build/下班啦.app release/下班啦-v1.9.3.zip
 ```
 
 `release/` 用于本地安装包，默认被 git 忽略；只有用户明确要求发布包随仓库发布时，才强制暂存指定包。清理旧包须在用户确认后进行。

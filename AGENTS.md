@@ -13,7 +13,7 @@ macOS 菜单栏下班倒计时 App（SwiftUI + AppKit），功能说明见 READM
 
 - `Sources/下班啦/`：WorkTimerModel（工时规则、倒欠计时、自动计时 shouldAutoStart / AutoStartGate / 到工位缓冲 autoStartArrival、深浅模式、主题色 AccentPreset、倒计时样式 CountdownStyle）、ReminderModel（提醒调度）、BubbleController（思考泡）、CountdownCardView（卡片 + CardPalette + 翻页/灵动岛/待机时钟三种数字样式）、WidgetContainer（背景渲染，图片背景已下线、注释保留）、SettingsView（侧边栏两栏设置面板 + SettingsPalette + themeAccent 环境值 + 自绘强调色开关）、TodayPanel（「今日工作」点阵屏面板 + TodayPalette + 逐位时间输入）、AppDelegate（含设置窗口高度限制 SettingsResizeDelegate）
 - `Tests/`：AutoStartTests.swift、ReminderSelectionTests.swift + run.sh（无 XCTest，只用 swiftc 编译成可执行文件跑断言）
-- `Assets/Videos/{喝水,彩蛋,下班}/`：内置视频，必须 640×640
+- `Assets/Videos/`：提醒动画与幸福指数封面，素材规格和压缩参数见 README「视频素材」
 - `docs/project-context/`：跨对话任务接力（CURRENT.md / BACKLOG.md），新对话先读 CURRENT.md 再核对 git
 
 ## 约定
@@ -36,4 +36,4 @@ macOS 菜单栏下班倒计时 App（SwiftUI + AppKit），功能说明见 READM
 
 ## 当前状态
 
-当前构建版本为 v1.9.2（build 19）。设置面板采用中性玻璃材质和统一悬停反馈；提醒页提供喝水／休息／下班 Tab，在岗时间默认按天展示，并支持周饮水统计。安装包及发布流程见 README。
+当前构建版本见 build.sh，变更摘要见 docs/project-context/CURRENT.md。设置面板采用中性玻璃材质和统一悬停反馈；提醒页提供喝水／休息／下班 Tab，在岗时间默认按天展示，并支持周饮水统计。安装包及发布流程见 README。
