@@ -147,6 +147,7 @@ struct SettingsView: View {
     /// 当前选中的侧边栏分区，默认「工作时长」
     /// 动画库仅在当前提醒页会话中展开；离开该分区即恢复收起。
     @State private var libraryExpansion = ReminderLibraryExpansionState()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// 在岗时间的筛选状态由内容区与日期控制组共享。
 
     var body: some View {
@@ -483,7 +484,9 @@ struct SettingsView: View {
                 }
                 Spacer(minLength: 8)
                 Button(libraryExpansion.isExpanded(kind) ? "收起" : "选择动画") {
-                    libraryExpansion.toggle(kind)
+                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
+                        libraryExpansion.toggle(kind)
+                    }
                 }
                 .controlSize(.regular)
                 .disabled(videos.isEmpty)
@@ -559,6 +562,12 @@ struct SettingsView: View {
     private static func hoursText(_ h: Double) -> String {
         h == h.rounded() ? "\(Int(h)) 小时" : String(format: "%.1f 小时", h)
     }
+}
+
+/// 缓存已解码的首帧，避免反复展开时重新读取视频。
+private enum ReminderThumbnailCache {
+    static let images = NSCache<NSURL, NSImage>()
+    static let queue = DispatchQueue(label: "com.xiabanla.thumbnail", qos: .userInitiated)
 }
 
 /// 内置提醒视频的紧凑缩略图。首帧异步解码，解码失败时保持中性占位图。
@@ -638,13 +647,23 @@ private struct ReminderAnimationThumbnail: View {
     private func loadThumbnail() {
         guard thumbnail == nil else { return }
         let videoURL = url
-        DispatchQueue.global(qos: .userInitiated).async {
+        if let cached = ReminderThumbnailCache.images.object(forKey: videoURL as NSURL) {
+            thumbnail = cached
+            return
+        }
+        ReminderThumbnailCache.queue.async {
+            if let cached = ReminderThumbnailCache.images.object(forKey: videoURL as NSURL) {
+                DispatchQueue.main.async { thumbnail = cached }
+                return
+            }
             let generator = AVAssetImageGenerator(asset: AVAsset(url: videoURL))
             generator.appliesPreferredTrackTransform = true
             generator.maximumSize = CGSize(width: 240, height: 160)
             let image = try? generator.copyCGImage(at: .zero, actualTime: nil)
             guard let image else { return }
-            DispatchQueue.main.async { thumbnail = NSImage(cgImage: image, size: .zero) }
+            let result = NSImage(cgImage: image, size: .zero)
+            ReminderThumbnailCache.images.setObject(result, forKey: videoURL as NSURL)
+            DispatchQueue.main.async { thumbnail = result }
         }
     }
 }

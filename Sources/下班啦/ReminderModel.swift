@@ -21,7 +21,15 @@ enum ReminderKind: String, CaseIterable, Hashable {
 enum VideoLibrary {
     static let extensions: Set<String> = ["mp4", "mov", "m4v"]
 
+    private static let bundledVideos: [ReminderKind: [URL]] = Dictionary(
+        uniqueKeysWithValues: ReminderKind.allCases.map { ($0, loadVideos($0)) }
+    )
+
     static func videos(_ kind: ReminderKind) -> [URL] {
+        bundledVideos[kind] ?? []
+    }
+
+    private static func loadVideos(_ kind: ReminderKind) -> [URL] {
         guard let resources = Bundle.main.resourceURL else { return [] }
         let folder = resources.appendingPathComponent("Videos/\(kind.folderName)", isDirectory: true)
         let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil,

@@ -12,13 +12,13 @@ enum ScreenTimePeriod: String, CaseIterable, Identifiable {
 /// 周视图的饮水摘要独立于 SwiftUI，确保汇总口径和轻量文案都可测试。
 struct WeeklyWaterIntakeSummary: Equatable {
     let dailyMilliliters: [Int]
+    let workedDays: Int
 
     var totalMilliliters: Int { dailyMilliliters.reduce(0, +) }
 
-    /// 周视图固定按七天折算，空白日期也会计入，避免只记录一天时误导成“日均很高”。
-    var averageDailyMilliliters: Int {
-        guard !dailyMilliliters.isEmpty else { return 0 }
-        return Int((Double(totalMilliliters) / Double(dailyMilliliters.count)).rounded())
+    var averageDailyMilliliters: Int? {
+        guard workedDays > 0 else { return nil }
+        return Int((Double(totalMilliliters) / Double(workedDays)).rounded())
     }
 
     var message: String {

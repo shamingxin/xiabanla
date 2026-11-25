@@ -91,7 +91,9 @@ check("下班提醒接入动画库", settingsSource.contains("animationLibrary(.
 check("深色模块底色使用更浅的叠层", settingsSource.contains("card: Color.white.opacity(0.10)"))
 
 check("在岗卡片不再叠加旧的深黑遮罩", !screenTimeSource.contains(".black.opacity(0.42)"))
-check("在岗周图使用当前工作日标签", screenTimeSource.contains("labels: weekChartLabels"))
+check("在岗周图使用当前工作日标签", screenTimeSource.contains("WorkWeekChart(days: chartDays") &&
+      screenTimeSource.contains("weekChartDates.map { date in") &&
+      screenTimeSource.contains("label: WorkweekChartLabels.label(for: calendar.component(.weekday, from: date))"))
 check("在岗页不再在内容区放日期工具栏", !screenTimeSource.contains("HStack {\n                Spacer()\n                ScreenTimeToolbar"))
 check("在岗日期工具栏位于原生标题栏", appDelegateSource.contains("NSTitlebarAccessoryViewController"))
 
