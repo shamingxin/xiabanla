@@ -129,13 +129,15 @@ struct ScreenTimeView: View {
     private var compareTitle: String { period == .day ? "与昨天比" : "与上周比" }
     private var compareReference: TimeInterval {
         if period == .day { return workSeconds(on: calendar.date(byAdding: .day, value: -1, to: selectedDay)!) }
-        return weekAverage(for: calendar.date(byAdding: .day, value: -7, to: weekStart)!)
+        return (1...7).reduce(0) { total, offset in
+            total + workSeconds(on: calendar.date(byAdding: .day, value: -offset, to: weekStart)!)
+        }
     }
     private var compareHasData: Bool { period == .day ? dailyPresenceSummary.creditedSeconds != nil && compareReference > 0 : compareReference > 0 }
     private var compareText: String {
         guard compareHasData else { return period == .day ? "暂无昨天数据" : "暂无上周数据" }
         let change = Int(((primarySeconds - compareReference) / compareReference * 100).rounded())
-        if change == 0 { return "与上一周期持平" }
+        if change == 0 { return period == .day ? "与昨天持平" : "与上周持平" }
         return change > 0 ? "多 \(change)%" : "少 \(-change)%"
     }
     private var weekStart: Date {
@@ -305,6 +307,7 @@ private struct WaterIntakeCard: View {
     @Environment(\.colorScheme) private var scheme
 
     @State private var hoveredAmount: Int?
+    @State private var messageVariant = Int.random(in: 0..<3)
     private let quickAmounts = [100, 200, 250, 330, 500]
     private var total: Int { period == .day ? daySummary.consumedMilliliters : weeklySummary.totalMilliliters }
     private var goal: Int { daySummary.goalMilliliters * (period == .day ? 1 : 7) }
@@ -330,8 +333,8 @@ private struct WaterIntakeCard: View {
                              : "目标 \(goal.formatted()) ml · 还剩 \(daySummary.remainingMilliliters.formatted()) ml")
                             .lineLimit(1).minimumScaleFactor(0.75)
                     } else {
-                        Text(weeklySummary.averageDailyMilliliters.map { "日均 \($0.formatted()) ml" } ?? "日均 —")
-                        Text(weeklySummary.message).foregroundStyle(.secondary)
+                        Text(weeklySummary.averageDailyMilliliters.map { "在岗日日均 \($0.formatted()) ml" } ?? "在岗日日均 —")
+                        Text(weeklySummary.message(variant: messageVariant)).foregroundStyle(.secondary)
                     }
                 }
                 .font(.system(size: 12))

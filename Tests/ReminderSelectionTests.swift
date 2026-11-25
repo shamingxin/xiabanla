@@ -80,7 +80,7 @@ check("喝水提醒下有常规设置卡", settingsSource.contains("SettingsCard
 check("喝水提醒下有强制提醒卡", settingsSource.contains("SettingsCard { waterStickyRows }"))
 check("强制提醒不再作为额外标题", !settingsSource.contains("SettingsSection(\"强制提醒\")"))
 check("常规设置不再作为额外标题", !settingsSource.contains("SettingsSection(\"常规设置\")"))
-check("强制提醒是第二张卡的首行", settingsSource.contains("SettingsRow(\"强制提醒\""))
+check("强制提醒是第二张卡的首行", settingsSource.contains("SettingsRow(\"手动关闭提醒\""))
 check("提醒 Tab 内容使用统一分组间距", settingsSource.contains("VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing)"))
 check("喝水 Tab 的两张卡使用紧凑间距", settingsSource.contains("VStack(spacing: 10) {"))
 check("休息 Tab 展示专属设置", settingsSource.contains("case .rest:\n            SettingsCard { eggRows }"))

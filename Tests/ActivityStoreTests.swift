@@ -175,7 +175,7 @@ check("周饮水累计所有日期", weeklyWater.totalMilliliters, 2600)
 check("周饮水按实际计时天数平均", weeklyWater.averageDailyMilliliters, 867)
 check("计时但未饮水的日期计入平均", WeeklyWaterIntakeSummary(dailyMilliliters: [900, 0, 0], workedDays: 2).averageDailyMilliliters, 450)
 check("没有计时的日期不显示日均", WeeklyWaterIntakeSummary(dailyMilliliters: [500, 0], workedDays: 0).averageDailyMilliliters, nil)
-check("周饮水文案提供杯数换算", weeklyWater.message.contains("杯"), true)
+check("周饮水文案提供杯数换算", weeklyWater.message(variant: 0).contains("杯"), true)
 check("周图只显示周一至周五", WorkweekChartLabels.selectedLabels(for: [2, 3, 4, 5, 6]), ["一", "二", "三", "四", "五"])
 check("周图按当前上班日排序", WorkweekChartLabels.selectedLabels(for: [1, 3, 5]), ["二", "四", "日"])
 

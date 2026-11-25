@@ -199,7 +199,10 @@ private enum HappinessCopy {
     static let openers = [
         "回望本周的工作节奏。",
         "看看这一周，时间如何流过。",
-        "整理这一周的在岗记录。"
+        "整理这一周的在岗记录。",
+        "看看这一周，留给生活多少时间。",
+        "翻开这一周的下班日记。",
+        "忙了一周，也来看看自己的时间。"
     ]
     static let loading = ["正在翻看本周下班记录…", "正在计算被加班偷走的时间…", "正在生成你的幸福小卡…"]
 }
@@ -257,7 +260,7 @@ private struct HappinessResultCard: View {
                     }
                     .padding(.top, 2)
                     HStack(spacing: 10) {
-                        HappinessMetric(title: "参与天数", value: "\(summary.days.count) 天", ink: ink)
+                        HappinessMetric(title: "已记录天数", value: "\(summary.days.count) 天", ink: ink)
                         HappinessMetric(title: "准时下班", value: "\(summary.onTimeDays) 天", ink: ink)
                         HappinessMetric(title: "加班时间", value: duration(summary.overtimeSeconds), ink: ink)
                     }
@@ -273,7 +276,7 @@ private struct HappinessResultCard: View {
                 Text("本周还没有\n可测量的幸福记录")
                     .font(.system(size: 27, weight: .bold, design: .rounded))
                     .foregroundStyle(ink)
-                Text("等某个工作日下班并封存记录后，再来抽这张卡。")
+                Text("等一个工作日结束并记录完成后，再来看看。")
                     .font(.system(size: 13))
                     .foregroundStyle(ink.opacity(0.72))
                     .padding(.top, 10)
@@ -295,11 +298,25 @@ private struct HappinessResultCard: View {
     private func starFill(at index: Int, rating: Double) -> CGFloat {
         min(1, max(0, rating - Double(index)))
     }
+    @State private var copyVariant = Int.random(in: 0..<3)
+
     private var personaText: String {
         switch persona {
-        case .gentle: return "准时下班不是偷懒，是把生活还给自己。"
-        case .spicy: return summary.overtimeSeconds == 0 ? "公司这周没能占用你的夜晚，继续保持。" : "公司拿走了一点时间，但还没拿走你的周末。"
-        case .calm: return "本周 \(summary.days.count) 个有效工作日中，\(summary.onTimeDays) 天未超过计划工时。"
+        case .gentle: return [
+            "准时下班不是偷懒，是把生活还给自己。",
+            "工作有终点，今天也给自己留点时间。",
+            "下班后的时间，值得好好珍藏。"
+        ][copyVariant]
+        case .spicy:
+            let messages = summary.overtimeSeconds == 0
+                ? ["公司这周没能占用你的夜晚，继续保持。", "这周守住了下班时间，晚饭可以从容一点。", "准时收工，这周的夜晚属于你。"]
+                : ["公司拿走了一点时间，记得也留些时间给自己。", "这周辛苦了，下班后给自己放个小假。", "加班有记录，休息也要安排上。"]
+            return messages[copyVariant]
+        case .calm: return [
+            "本周 \(summary.days.count) 个已记录工作日中，\(summary.onTimeDays) 天未超过计划工时。",
+            "记录了 \(summary.days.count) 天，其中 \(summary.onTimeDays) 天在计划工时内结束。",
+            "这周已记录 \(summary.days.count) 天，有 \(summary.onTimeDays) 天没有超过计划工时。"
+        ][copyVariant]
         }
     }
     private func duration(_ seconds: TimeInterval) -> String {

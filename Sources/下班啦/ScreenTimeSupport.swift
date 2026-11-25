@@ -21,10 +21,17 @@ struct WeeklyWaterIntakeSummary: Equatable {
         return Int((Double(totalMilliliters) / Double(workedDays)).rounded())
     }
 
-    var message: String {
-        guard totalMilliliters > 0 else { return "本周水杯还在待命。" }
+    func message(variant: Int) -> String {
+        let index = max(0, variant) % 3
+        guard totalMilliliters > 0 else {
+            return ["本周水杯还在待命。", "这周的第一口水，等你来记录。", "水杯准备好了，记得补充水分。"][index]
+        }
         let cups = max(1, Int((Double(totalMilliliters) / 200).rounded()))
-        return "本周约喝了 \(cups) 杯 200 ml 的办公室水。"
+        return [
+            "相当于约 \(cups) 杯水（每杯 200 ml）。",
+            "这周已积攒约 \(cups) 杯水（每杯 200 ml）。",
+            "换成 200 ml 的水杯，约有 \(cups) 杯。"
+        ][index]
     }
 }
 

@@ -63,7 +63,7 @@ struct TodayPanel: View {
                     }
                     .accessibilityElement(children: .combine)
                 } else {
-                    Text("按 ✓ 开始上班").foregroundStyle(p.dim)
+                    Text("点击 ✓ 开始计时").foregroundStyle(p.dim)
                 }
             }
             .font(.system(size: 12, weight: .medium))

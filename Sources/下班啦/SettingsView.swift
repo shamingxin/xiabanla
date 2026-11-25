@@ -9,10 +9,10 @@ import AVFoundation
 /// - 说明文字：次级色、11pt、左对齐，放在卡片下方
 /// 设置面板侧边栏分区：对应系统设置左侧列表
 enum SettingsSidebarItem: String, CaseIterable, Identifiable {
-    case workHours = "工作时长"
+    case workHours = "工作时间"
     case reminderAnimations = "提醒"
     case general = "通用"
-    case screenTime = "在岗时间"
+    case screenTime = "在岗记录"
     case happinessIndex = "幸福指数"
     case appearance = "外观"
     case about = "关于"
@@ -144,7 +144,7 @@ struct SettingsView: View {
     /// 顶部 toast 文案，nil 时隐藏
     @State private var toast: String?
     @State private var toastToken = 0
-    /// 当前选中的侧边栏分区，默认「工作时长」
+    /// 当前选中的侧边栏分区，默认「工作时间」
     /// 动画库仅在当前提醒页会话中展开；离开该分区即恢复收起。
     @State private var libraryExpansion = ReminderLibraryExpansionState()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -276,7 +276,7 @@ struct SettingsView: View {
         }
     }
 
-    private static let rangeResetToast = "下班区间不能早于开始，已恢复默认 10:00 – 12:00"
+    private static let rangeResetToast = "上班时间的结束时间不能早于开始时间，已恢复默认设置。"
 
     // MARK: - 今日工作
 
@@ -329,7 +329,7 @@ struct SettingsView: View {
     /// 一个开关 + 开启后的上班日；开机自动开始依赖「登录时打开」，没开时给一条提示
     private var autoStartSection: some View {
         SettingsCard {
-            SettingsRow("自动计时", subtitle: "开机后，今天的倒计时自动启程。") {
+            SettingsRow("自动计时", subtitle: "上班日登录或解锁后，符合时间条件时自动开始。") {
                 SettingsSwitch(isOn: $model.autoStartEnabled)
                     .accessibilityLabel("自动计时")
             }
@@ -362,7 +362,7 @@ struct SettingsView: View {
     /// 独立于自动计时：不管自动开始还是手动点「开始上班」，到岗时间都按此回拨
     private var commuteBufferSection: some View {
         SettingsCard {
-            SettingsRow("到工位缓冲", subtitle: "为抵达工位，预留一段缓冲。") {
+            SettingsRow("到工位缓冲", subtitle: "开始计时时，往前计入一段到工位的时间。") {
                 SettingsSwitch(isOn: $model.commuteBufferEnabled)
                     .accessibilityLabel("到工位缓冲")
             }
@@ -423,7 +423,7 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var waterStickyRows: some View {
-        SettingsRow("强制提醒", subtitle: "提醒将持续显示，等待你关闭。") {
+        SettingsRow("手动关闭提醒", subtitle: "提醒会持续显示，直到你手动关闭。") {
             SettingsSwitch(isOn: $reminders.waterSticky)
         }
         if reminders.waterSticky {

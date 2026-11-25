@@ -130,7 +130,7 @@ struct CountdownCardView: View {
                 }
             }
             if model.isResting || model.isWaitingForUnlock {
-                Text(model.isWaitingForUnlock ? "休息中，等待下一次有效解锁" : "下一工作日将在凌晨 5:00 开始").font(.system(size: 13, weight: .medium))
+                Text(model.isWaitingForUnlock ? "休息中，等待解锁后继续" : "下一工作日将在凌晨 5:00 开始").font(.system(size: 13, weight: .medium))
                     .foregroundStyle(palette.faint).frame(maxWidth: .infinity, minHeight: 48)
             } else if model.hasStarted {
                 progressFooter
