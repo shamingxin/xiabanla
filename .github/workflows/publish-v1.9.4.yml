@@ -1,0 +1,33 @@
+name: Publish v1.9.4 installer
+on:
+  push:
+    branches: [publish-v1.9.4]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Verify and publish the macOS installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset=xiabanla-v1.9.4.zip
+          curl --fail --silent --show-error --location --retry 3 'https://raw.githubusercontent.com/shamingxin/xiabanla/b34f59e790a335960a6f5f9ee2be51b7b2d1904b/release/%E4%B8%8B%E7%8F%AD%E5%95%A6-v1.9.4.zip' -o "$asset"
+          echo "be2ec25456102f6911093032fa39760aa8abf288cc8ac4c8e73c774c189a474a  $asset" | sha256sum --check
+          cat > "$RUNNER_TEMP/notes.md" <<'NOTES'
+          - 「外观」恢复五种预设主题色和自定义颜色，默认使用亮蓝色。
+          - 每日饮水目标新增 3500、4000、4500 ml，单次饮水量新增 50 ml。
+          - 饮水卡使用固定的青蓝色水波。水杯、水桶和水缸等高、逐档变宽，达标后仍有水波动画。选择 4500 ml 时显示星之卡比动图。
+
+          [下载安装包（ZIP）](https://github.com/shamingxin/xiabanla/releases/download/v1.9.4/xiabanla-v1.9.4.zip)
+
+          适用于 Apple 芯片的 Mac，系统要求 macOS 13 或更高版本。解压后打开「下班啦.app」。
+
+          SHA-256 `be2ec25456102f6911093032fa39760aa8abf288cc8ac4c8e73c774c189a474a`
+          NOTES
+          gh release create v1.9.4 "$asset#下班啦 v1.9.4 · macOS 安装包" --verify-tag --title 'v1.9.4 · 主题色与饮水动画' --notes-file "$RUNNER_TEMP/notes.md" --latest
