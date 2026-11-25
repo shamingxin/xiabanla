@@ -1,0 +1,31 @@
+name: Publish v1.9.3 installer
+on:
+  push:
+    branches: [publish-v1.9.3]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Verify and publish the macOS installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset=xiabanla-v1.9.3.zip
+          curl --fail --silent --show-error --location --retry 3 'https://raw.githubusercontent.com/shamingxin/xiabanla/7c677098e8e46024d5ae0c22534590aaa19bbe5c/release/%E4%B8%8B%E7%8F%AD%E5%95%A6-v1.9.3.zip' -o "$asset"
+          echo "1e4f60476b264129650c1a97e5781ce829f8c8c988d9722b4cc955d5839a4337  $asset" | sha256sum --check
+          cat > "$RUNNER_TEMP/notes.md" <<'NOTES'
+          45 段内置动画保留原分辨率、帧率与时长，安装包从 138.9 MiB 减至 19.7 MiB。
+
+          [下载安装包（ZIP）](https://github.com/shamingxin/xiabanla/releases/download/v1.9.3/xiabanla-v1.9.3.zip)
+
+          适用于 Apple 芯片的 Mac，系统要求 macOS 13 或更高版本。解压后打开「下班啦.app」。
+
+          SHA-256 `1e4f60476b264129650c1a97e5781ce829f8c8c988d9722b4cc955d5839a4337`
+          NOTES
+          gh release create v1.9.3 "$asset#下班啦 v1.9.3 · macOS 安装包" --verify-tag --title 'v1.9.3 · 内置动画瘦身' --notes-file "$RUNNER_TEMP/notes.md" --latest
