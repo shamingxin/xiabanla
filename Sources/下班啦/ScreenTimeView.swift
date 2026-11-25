@@ -5,8 +5,15 @@ final class ScreenTimeState: ObservableObject {
     @Published var selectedDate = WorkTimerModel.workdayBase(for: Date())
 }
 
+enum ReminderTab: String, CaseIterable {
+    case water = "喝水"
+    case rest = "休息"
+    case offWork = "下班"
+}
+
 final class SettingsNavigationState: ObservableObject {
     @Published var selectedSection: SettingsSidebarItem = .workHours
+    @Published var selectedReminderTab: ReminderTab = .water
 }
 
 /// 仅统计下班啦记录的工作与喝水行为，不读取系统 App 使用时间。
@@ -20,7 +27,7 @@ struct ScreenTimeView: View {
     private let calendar = Calendar.current
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
             ScreenTimeCard {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 3) {
@@ -49,7 +56,11 @@ struct ScreenTimeView: View {
                 }.padding(.top, 4)
             }
             if reminders.waterTrackingEnabled {
-                WaterIntakeCard(summary: waterIntakeSummary, day: waterFocusDay,
+                WaterIntakeCard(period: period,
+                                daySummary: waterIntakeSummary,
+                                weeklySummary: weeklyWaterIntakeSummary,
+                                day: selectedDay,
+                                showQuickAdd: period == .day,
                                 canAdd: isCurrentWaterFocusDay,
                                 onAdd: { reminders.addWater($0) })
             }
@@ -102,13 +113,18 @@ struct ScreenTimeView: View {
         weekChartDates.map { WorkweekChartLabels.label(for: calendar.component(.weekday, from: $0)) }
     }
     private var weekAverage: TimeInterval { weekAverage(for: weekStart) }
-    private var waterFocusDay: Date { period == .week ? WorkTimerModel.workdayBase(for: model.now) : selectedDay }
     private var isCurrentWaterFocusDay: Bool {
-        workdayKey(forCalendarDay: waterFocusDay) == WorkTimerModel.workdayKey(for: model.now)
+        workdayKey(forCalendarDay: selectedDay) == WorkTimerModel.workdayKey(for: model.now)
     }
     private var waterIntakeSummary: WaterIntakeSummary {
-        WaterIntakeSummary(consumedMilliliters: activity.waterMilliliters(workday: workdayKey(forCalendarDay: waterFocusDay)),
+        WaterIntakeSummary(consumedMilliliters: activity.waterMilliliters(workday: workdayKey(forCalendarDay: selectedDay)),
                            goalMilliliters: reminders.dailyWaterGoalMilliliters)
+    }
+    private var weeklyWaterIntakeSummary: WeeklyWaterIntakeSummary {
+        WeeklyWaterIntakeSummary(dailyMilliliters: (0..<7).map { offset in
+            let day = calendar.date(byAdding: .day, value: offset, to: weekStart)!
+            return activity.waterMilliliters(workday: workdayKey(forCalendarDay: day))
+        })
     }
     private var dailyPresenceSummary: DailyPresenceSummary {
         let key = workdayKey(forCalendarDay: selectedDay)
@@ -180,10 +196,10 @@ struct ScreenTimeToolbar: View {
             } label: {
                 Text(state.period == .day ? state.selectedDate.formatted(.dateTime.month().day()) : weekRange)
                     .font(.system(size: 13, weight: .medium)).padding(.horizontal, 10).frame(height: 28)
-            }.menuStyle(.borderlessButton).fixedSize().accessibilityLabel("选择按天或按周查看")
-            Button { shift(-1) } label: { Image(systemName: "chevron.left") }.buttonStyle(.bordered)
-            Button(state.period == .day ? "今天" : "本周") { state.selectedDate = WorkTimerModel.workdayBase(for: Date()) }.buttonStyle(.bordered)
-            Button { shift(1) } label: { Image(systemName: "chevron.right") }.buttonStyle(.bordered)
+            }.menuStyle(.borderlessButton).fixedSize().settingsHoverFeedback(cornerRadius: 7).accessibilityLabel("选择按天或按周查看")
+            Button { shift(-1) } label: { Image(systemName: "chevron.left") }.buttonStyle(.bordered).settingsHoverFeedback(cornerRadius: 7)
+            Button(state.period == .day ? "今天" : "本周") { state.selectedDate = WorkTimerModel.workdayBase(for: Date()) }.buttonStyle(.bordered).settingsHoverFeedback(cornerRadius: 7)
+            Button { shift(1) } label: { Image(systemName: "chevron.right") }.buttonStyle(.bordered).settingsHoverFeedback(cornerRadius: 7)
         }
     }
     private var weekRange: String {
@@ -240,8 +256,11 @@ private struct DailyPresenceMetrics: View {
 }
 
 private struct WaterIntakeCard: View {
-    let summary: WaterIntakeSummary
+    let period: ScreenTimePeriod
+    let daySummary: WaterIntakeSummary
+    let weeklySummary: WeeklyWaterIntakeSummary
     let day: Date
+    let showQuickAdd: Bool
     let canAdd: Bool
     let onAdd: (Int) -> Void
     @Environment(\.themeAccent) private var accent
@@ -249,40 +268,68 @@ private struct WaterIntakeCard: View {
 
     private let quickAmounts = [100, 200, 250, 330, 500]
 
+    private var totalMilliliters: Int {
+        period == .day ? daySummary.consumedMilliliters : weeklySummary.totalMilliliters
+    }
+
+    private var progress: Double {
+        if period == .day { return Double(daySummary.percentage) / 100 }
+        let weeklyGoal = max(1, daySummary.goalMilliliters * 7)
+        return min(1, Double(weeklySummary.totalMilliliters) / Double(weeklyGoal))
+    }
+
+    private var title: String {
+        period == .day ? day.formatted(.dateTime.month().day()) + " 饮水量" : "本周饮水量"
+    }
+
+    private var detail: String {
+        period == .day
+            ? "完成 \(daySummary.percentage)% · 还差 \(daySummary.remainingMilliliters) ml"
+            : "平均每天 \(weeklySummary.averageDailyMilliliters) ml"
+    }
+
     var body: some View {
         ScreenTimeCard {
             HStack(alignment: .center, spacing: 18) {
-                WaterGlass(progress: Double(summary.percentage) / 100, color: accent)
+                WaterGlass(progress: progress, color: accent)
                     .frame(width: 72, height: 104)
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(day.formatted(.dateTime.month().day()) + " 饮水量")
+                    Text(title)
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.secondary)
                     HStack(alignment: .lastTextBaseline, spacing: 3) {
-                        Text("\(summary.consumedMilliliters)")
+                        Text("\(totalMilliliters)")
                             .font(.system(size: 30, weight: .medium, design: .rounded))
                             .monospacedDigit()
                         Text("ml").font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
                     }
-                    Text("完成 \(summary.percentage)% · 还差 \(summary.remainingMilliliters) ml")
+                    Text(detail)
                         .font(.system(size: 11)).foregroundStyle(.secondary)
+                    if period == .week {
+                        Text(weeklySummary.message)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 Spacer(minLength: 0)
             }
-            Text("快捷补记").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary).padding(.top, 3)
-            HStack(spacing: 7) {
-                ForEach(quickAmounts, id: \.self) { amount in
-                    Button { onAdd(amount) } label: {
-                        Text("+\(amount)")
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
-                            .frame(maxWidth: .infinity, minHeight: 28)
+            if showQuickAdd {
+                Text("快捷补记").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary).padding(.top, 3)
+                HStack(spacing: 7) {
+                    ForEach(quickAmounts, id: \.self) { amount in
+                        Button { onAdd(amount) } label: {
+                            Text("+\(amount)")
+                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .frame(maxWidth: .infinity, minHeight: 28)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(accent)
+                        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(accent.opacity(0.13)))
+                        .disabled(!canAdd)
+                        .settingsHoverFeedback(cornerRadius: 9)
+                        .accessibilityLabel("补记 \(amount) 毫升")
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(accent)
-                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(accent.opacity(0.13)))
-                    .disabled(!canAdd)
-                    .settingsHoverFeedback(cornerRadius: 9)
-                    .accessibilityLabel("补记 \(amount) 毫升")
                 }
             }
         }

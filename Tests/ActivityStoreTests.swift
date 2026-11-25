@@ -169,7 +169,11 @@ check("按天摘要缺失记录文案", unavailableMetricText.arrival, "未记�
 check("按天摘要未加班显示横线", DailyPresenceMetricText(summary: DailyPresenceSummary.make(
     segments: [OfficePresenceSegment(id: 1, workday: "2026-11-14", startedAt: date(14, 9), endedAt: date(14, 17))],
     plannedSeconds: 9 * 3600, now: date(14, 22), isCurrentWorkday: false)).overtime, "—")
-check("在岗时间默认显示本周", ScreenTimePeriod.defaultPeriod, .week)
+check("在岗时间默认显示当天", ScreenTimePeriod.defaultPeriod, .day)
+let weeklyWater = WeeklyWaterIntakeSummary(dailyMilliliters: [900, 1200, 0, 500, 0, 0, 0])
+check("周饮水累计所有日期", weeklyWater.totalMilliliters, 2600)
+check("周饮水按七天平均", weeklyWater.averageDailyMilliliters, 371)
+check("周饮水文案提供杯数换算", weeklyWater.message.contains("杯"), true)
 check("周图只显示周一至周五", WorkweekChartLabels.selectedLabels(for: [2, 3, 4, 5, 6]), ["一", "二", "三", "四", "五"])
 check("周图按当前上班日排序", WorkweekChartLabels.selectedLabels(for: [1, 3, 5]), ["二", "四", "日"])
 

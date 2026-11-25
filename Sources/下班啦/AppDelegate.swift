@@ -237,6 +237,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                   styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
                                   backing: .buffered, defer: false)
             window.contentView = hosting
+            window.acceptsMouseMovedEvents = true
             window.delegate = settingsResizeDelegate
             // 只允许上下拉高度：宽度锁死（「今日工作」面板按 480 内容宽设计）
             window.contentMinSize = NSSize(width: SettingsMetrics.windowWidth, height: SettingsMetrics.minWindowHeight)
@@ -262,8 +263,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.toolbar = toolbar
             window.toolbarStyle = .unified
             let toolbarAccessory = NSTitlebarAccessoryViewController()
-            let toolbarView = NSHostingView(rootView: ScreenTimeToolbarTitlebarAccessory(
-                navigation: settingsNavigation, screenTimeState: screenTimeState
+            let toolbarView = NSHostingView(rootView: SettingsToolbarTitlebarAccessory(
+                navigation: settingsNavigation, screenTimeState: screenTimeState, model: model
             ))
             toolbarView.frame.size = toolbarView.fittingSize
             toolbarAccessory.view = toolbarView

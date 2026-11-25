@@ -19,10 +19,11 @@ macOS 菜单栏下班倒计时 App（SwiftUI + AppKit），功能说明见 READM
 ## 约定
 
 - 设置窗口两栏布局，宽度固定 678，高度可上下拖动 500–1000、默认 680、松手后记住（`settingsWindowHeight`）；高度限制必须放在 `SettingsResizeDelegate.windowWillResize`，`contentMinSize/contentMaxSize` 在窗口显示后会被 NSHostingView 清零（侧边栏浮起面板内缩 8 + 宽 190，右内容区 480 宽，尺寸常量在 `SettingsMetrics`），hosting 的 `sizingOptions = []`，不要改成随内容自适应（会布局循环闪退）；窗口 fullSizeContentView + 空 unified 工具栏，红黄绿按钮落在侧边栏面板内，右侧顶部 15pt 半粗标题和按钮同一行
-- 设置面板分七个侧边栏分区，顺序为：「工作时长」（今日工作+上班规则，默认选中）、「提醒」（喝水／放松／下班提醒）、「通用」（登录项）、「在岗时间」（公司电脑上的实际在岗片段）、「幸福指数」、「外观」（深浅模式 + 主题色一张卡片；下方「倒计时样式」独立成组，墙纸式 3 列预览网格 `CountdownStylePreview`，新增样式加枚举项 + 补预览画法即可）、「关于」（直接在内容区显示，不弹窗）；侧边栏每项是彩色圆角方块图标（分类色固定），选中态主题色实底，文字黑/白按底色亮度自动取（`Color.contrastingText`）
-- 配色走环境值：卡片用 `\.cardPalette`，设置面板用 `\.settingsPalette`，强调色用 `\.themeAccent`（在 SettingsView 根部由 `model.accentColor` 注入），不要写死 `Color.white` 或写死十六进制强调色
+- 「提醒」页以原生标题栏附件承载「喝水／休息／下班」分段 Tab，不能放进系统标题栏拖拽区；这样点击事件不会被窗口拖拽截走。Tab 保持深色毛玻璃胶囊、36pt 总高（单项 68×30、上下各 3pt），提醒页右侧预留 10pt；选中或悬停项相邻分隔线透明但保留占位，避免宽度跳动。
+- 设置面板分七个侧边栏分区，顺序为：「工作时长」（今日工作+上班规则，默认选中）、「提醒」（喝水／休息／下班提醒）、「通用」（登录项）、「在岗时间」（公司电脑上的实际在岗片段）、「幸福指数」、「外观」（深浅模式；下方「倒计时样式」独立成组，墙纸式 3 列预览网格 `CountdownStylePreview`，新增样式加枚举项 + 补预览画法即可）、「关于」（直接在内容区显示，不弹窗）；侧边栏每项是彩色圆角方块图标（分类色固定），选中态系统蓝实底，文字黑/白按底色亮度自动取（`Color.contrastingText`）
+- 配色走环境值：卡片用 `\.cardPalette`，设置面板用 `\.settingsPalette`，设置交互强调色用 `\.themeAccent`（在 SettingsView 根部固定注入 `SettingsPalette.systemBlue`）；设置视觉不要重新启用用户主题色，也不要写死 `Color.white` 或十六进制强调色
 - UserDefaults key 改名要兼容老用户（如 `defaultStartTime` 沿用）
-- **产品文案（2026-11 改版后）**：原「主题色」（黑/白/图片背景）现在叫「深浅模式」，只剩「浅色」「深色」两态，样式是系统设置「外观」同款窗口缩略图（`AppearanceThumbnail`）+ 下方文字，选中态主题色描边，上传图片功能已下线（代码保留注释，未删除，见 `WidgetContainer.customImage`）；新增「主题色」控制开关/数字等强调色（5 预设：荧光绿 #39FF14、莱茵蓝 #0057FF、黄 #FED501、粉 #FF6B9D、红 #FF3B30 + 自定义 hex 输入）；新增「倒计时样式」控制主卡片数字呈现（翻页 `flip` 现状 / 灵动岛 `dynamicIsland` 粗体数字+spring 果冻动画），只影响 CountdownCardView，不影响「今日工作」点阵面板
+- **产品文案（2026-11 改版后）**：原「主题色」（黑/白/图片背景）现在叫「深浅模式」，只剩「浅色」「深色」两态，样式是系统设置「外观」同款窗口缩略图（`AppearanceThumbnail`）+ 下方文字；设置交互统一系统蓝，不提供用户主题色选择。上传图片功能已下线（代码保留注释，未删除，见 `WidgetContainer.customImage`）；「倒计时样式」控制主卡片数字呈现（翻页 `flip` / 灵动岛 `dynamicIsland` / 待机时钟），只影响 CountdownCardView，不影响「今日工作」点阵面板
 - 设置窗口是透明窗口 + SwiftUI 自绘 28pt 圆角和背景模糊（15.x SDK 在 macOS 26 只给小圆角）；`.ignoresSafeArea()` 必须在 SettingsView 修饰链最外层，放里层会裁掉顶部、红黄绿按钮露到窗外
 - 设置配色三层半透明：侧边栏最透（`sidebarTintOpacity`）、内容区较实（`windowTintOpacity`）、卡片只叠极淡白/黑，不要改回不透明色块
 - 倒计时样式切换时卡片整体宽度必须保持一致（灵动岛的数字宽度、分隔符宽度要对齐翻页样式的 `Metrics.tileSize`/`tileGap`），不要让切换样式时卡片跳动
@@ -35,4 +36,4 @@ macOS 菜单栏下班倒计时 App（SwiftUI + AppKit），功能说明见 READM
 
 ## 当前状态
 
-v1.8.7（build 16）已推送：功能提交与标签为 `2926708` / `v1.8.7`。修复在岗时间页右上日期范围、视图菜单和前后切换在标题栏内无法点击的问题；控件改由原生标题栏附件承载，保留原有视觉位置、样式和间距。完整安装包为本地 `release/下班啦-v1.8.7.zip`（139 MB）；仓库内提供低于 100 MB 限制的分卷与 `release/README-v1.8.7.md` 合并说明。首次启动或升级后会一次性默认开启「登录时打开」和「自动计时」，默认上班日为周一至周五；之后仍尊重用户自行关闭或修改上班日的选择。
+当前构建版本为 v1.9（build 17）。设置面板采用中性玻璃材质和统一悬停反馈；提醒页提供喝水／休息／下班 Tab，在岗时间默认按天展示，并支持周饮水统计。安装包及发布流程见 README。

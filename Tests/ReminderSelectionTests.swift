@@ -54,25 +54,42 @@ libraryExpansion.collapseAll()
 check("离开页面后两个动画库均收起", !libraryExpansion.isExpanded(.water) && !libraryExpansion.isExpanded(.egg))
 
 let settingsSource = try! String(contentsOfFile: "Sources/下班啦/SettingsView.swift", encoding: .utf8)
-check("喝水提醒使用卡片上方标题", settingsSource.contains("SettingsHeader(\"喝水提醒\")"))
+let toolbarOverlaySource = try! String(contentsOfFile: "Sources/下班啦/ScreenTimeToolbarInteractionOverlay.swift", encoding: .utf8)
+let screenTimeSource = try! String(contentsOfFile: "Sources/下班啦/ScreenTimeView.swift", encoding: .utf8)
+let appDelegateSource = try! String(contentsOfFile: "Sources/下班啦/AppDelegate.swift", encoding: .utf8)
+check("提醒页提供喝水休息下班三个分段 Tab", screenTimeSource.contains("enum ReminderTab: String, CaseIterable") &&
+      screenTimeSource.contains("case water = \"喝水\"") &&
+      screenTimeSource.contains("case rest = \"休息\"") &&
+      screenTimeSource.contains("case offWork = \"下班\""))
+check("提醒页只展示当前 Tab 的设置", toolbarOverlaySource.contains("ReminderTabControl") &&
+      settingsSource.contains("switch navigation.selectedReminderTab"))
+check("提醒 Tab 由原生标题栏附件承载", toolbarOverlaySource.contains("ReminderTabTitlebarAccessory") &&
+      toolbarOverlaySource.contains(".allowsHitTesting(navigation.selectedSection == .reminderAnimations)") &&
+      appDelegateSource.contains("SettingsToolbarTitlebarAccessory"))
+check("提醒 Tab 使用轻量投影", toolbarOverlaySource.contains("radius: 4, y: 1"))
+check("提醒 Tab 使用 36pt 高度与紧凑右侧边距", toolbarOverlaySource.contains("frame(width: 68, height: 30)") &&
+      toolbarOverlaySource.contains(".padding(3)") &&
+      toolbarOverlaySource.contains("frame(width: navigation.selectedSection == .reminderAnimations ? 10 : SettingsMetrics.contentPadding)"))
+check("提醒开关文案对应当前 Tab", settingsSource.contains("SettingsRow(\"喝水提醒\")") &&
+      settingsSource.contains("SettingsRow(\"休息提醒\")") &&
+      settingsSource.contains("SettingsRow(\"下班提醒\")"))
+check("Tab 激活时隐藏相邻分隔线", toolbarOverlaySource.contains("shouldShowDivider(after: tab)"))
+check("离开提醒页时回到喝水 Tab", settingsSource.contains("navigation.selectedReminderTab = .water"))
+check("喝水 Tab 展示专属设置", settingsSource.contains("case .water:\n            waterReminderSection"))
 check("喝水提醒下有常规设置卡", settingsSource.contains("SettingsCard { waterRegularRows }"))
 check("喝水提醒下有强制提醒卡", settingsSource.contains("SettingsCard { waterStickyRows }"))
 check("强制提醒不再作为额外标题", !settingsSource.contains("SettingsSection(\"强制提醒\")"))
 check("常规设置不再作为额外标题", !settingsSource.contains("SettingsSection(\"常规设置\")"))
 check("强制提醒是第二张卡的首行", settingsSource.contains("SettingsRow(\"强制提醒\""))
-check("提醒大模块使用更大间距", settingsSource.contains("VStack(alignment: .leading, spacing: 28)"))
-check("喝水标题与两张卡使用紧凑间距", settingsSource.contains("VStack(spacing: 10) {"))
-check("放松提醒使用卡片上方标题", settingsSource.contains("SettingsSection(\"放松提醒\")"))
-check("下班提醒使用卡片上方标题", settingsSource.contains("SettingsSection(\"下班提醒\")"))
-check("三张卡片内的开关行统一叫动画提醒",
-      settingsSource.components(separatedBy: "SettingsRow(\"动画提醒\")").count == 4)
+check("提醒 Tab 内容使用统一分组间距", settingsSource.contains("VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing)"))
+check("喝水 Tab 的两张卡使用紧凑间距", settingsSource.contains("VStack(spacing: 10) {"))
+check("休息 Tab 展示专属设置", settingsSource.contains("case .rest:\n            SettingsCard { eggRows }"))
+check("下班 Tab 展示专属设置", settingsSource.contains("case .offWork:\n            SettingsCard { offWorkRows }"))
 check("动画选择行仍叫播放动画", settingsSource.contains("Text(\"播放动画\")"))
-check("动画已选数量读取当前主题色", settingsSource.contains("let accent = model.accentColor"))
+check("动画已选数量固定使用系统蓝", settingsSource.contains("let accent = SettingsPalette.systemBlue"))
 check("下班提醒接入动画库", settingsSource.contains("animationLibrary(.offWork)"))
-check("深色模块底色使用更浅的叠层", settingsSource.contains("card: Color.white.opacity(0.04)"))
+check("深色模块底色使用更浅的叠层", settingsSource.contains("card: Color.white.opacity(0.10)"))
 
-let screenTimeSource = try! String(contentsOfFile: "Sources/下班啦/ScreenTimeView.swift", encoding: .utf8)
-let appDelegateSource = try! String(contentsOfFile: "Sources/下班啦/AppDelegate.swift", encoding: .utf8)
 check("在岗卡片不再叠加旧的深黑遮罩", !screenTimeSource.contains(".black.opacity(0.42)"))
 check("在岗周图使用当前工作日标签", screenTimeSource.contains("labels: weekChartLabels"))
 check("在岗页不再在内容区放日期工具栏", !screenTimeSource.contains("HStack {\n                Spacer()\n                ScreenTimeToolbar"))

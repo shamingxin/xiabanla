@@ -3,7 +3,7 @@ import AppKit
 
 
 
-/// 卡片配色：黑色背景和图片背景用浅色字，白色背景用深色字
+/// 卡片配色：中性 Apple 灰白 / 深石墨玻璃上的数字、文字和控件层级。
 /// 「公司倒欠你」固定用同一个绿色，不随背景变化
 struct CardPalette {
     var digit: Color
@@ -16,19 +16,19 @@ struct CardPalette {
     var hover: Color
     let overtime = Color(red: 0.30, green: 0.78, blue: 0.40)
 
-    static let dark = CardPalette(digit: Color(white: 0.93),
-                                  label: Color.white.opacity(0.75),
-                                  faint: Color.white.opacity(0.66),
-                                  tile: Color.black.opacity(0.32),
-                                  track: Color.black.opacity(0.32),
-                                  hover: Color.white.opacity(0.14))
+    static let dark = CardPalette(digit: Color(white: 0.94),
+                                  label: Color.white.opacity(0.78),
+                                  faint: Color.white.opacity(0.62),
+                                  tile: Color.white.opacity(0.12),
+                                  track: Color.black.opacity(0.26),
+                                  hover: Color.white.opacity(0.12))
 
-    static let light = CardPalette(digit: Color(white: 0.12),
-                                   label: Color.black.opacity(0.70),
-                                   faint: Color.black.opacity(0.55),
-                                   tile: Color.black.opacity(0.06),
-                                   track: Color.black.opacity(0.10),
-                                   hover: Color.black.opacity(0.08))
+    static let light = CardPalette(digit: Color(red: 0.12, green: 0.125, blue: 0.14),
+                                   label: Color.black.opacity(0.72),
+                                   faint: Color.black.opacity(0.54),
+                                   tile: Color.white.opacity(0.60),
+                                   track: Color.black.opacity(0.11),
+                                   hover: Color.white.opacity(0.62))
 }
 
 private struct CardPaletteKey: EnvironmentKey {

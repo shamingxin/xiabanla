@@ -20,7 +20,7 @@ struct HappinessIndexView: View {
     @State private var invitation = HappinessCopy.openers.randomElement() ?? "回望本周的工作节奏。"
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
             switch state {
             case .invitation:
                 invitationView
@@ -51,11 +51,11 @@ struct HappinessIndexView: View {
             Button(action: startMeasurement) {
                 Label("回望本周", systemImage: "sparkles")
                     .font(.system(size: 14, weight: .semibold))
-                    .padding(.horizontal, 17)
-                    .frame(height: 40)
+                    .frame(maxWidth: .infinity, minHeight: 48)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(accent)
+            .foregroundStyle(accent.contrastingText)
+            .buttonStyle(HappinessActionButtonStyle(kind: .primary))
+            .frame(width: 180)
             .padding(.top, 22)
             .accessibilityHint("根据本周已封存的实际在岗记录计算")
         }
@@ -102,15 +102,12 @@ struct HappinessIndexView: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity, minHeight: 48)
-                    .background(Capsule().fill(Color.primary.opacity(scheme == .dark ? 0.18 : 0.10)))
-                    .overlay(Capsule().strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
-                    .buttonStyle(.plain)
+                    .buttonStyle(HappinessActionButtonStyle(kind: .secondary))
                 Button("查看本周在岗", action: showScreenTime)
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(accent.contrastingText)
                     .frame(maxWidth: .infinity, minHeight: 48)
-                    .background(Capsule().fill(accent))
-                    .buttonStyle(.plain)
+                    .buttonStyle(HappinessActionButtonStyle(kind: .primary))
             }
             .frame(maxWidth: 440)
         }
@@ -153,6 +150,44 @@ struct HappinessIndexView: View {
         let choices = HappinessPersona.allCases.filter { $0 != current }
         let nextPersona = choices.randomElement() ?? current
         runMeasurement(summary: summary, persona: nextPersona)
+    }
+}
+
+/// 结果页的两个胶囊操作共用的轻量交互：悬停提示可点击，按下给出即时确认。
+private struct HappinessActionButtonStyle: ButtonStyle {
+    enum Kind { case secondary, primary }
+
+    let kind: Kind
+    @Environment(\.themeAccent) private var accent
+    @Environment(\.colorScheme) private var scheme
+    @State private var hovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        let pressed = configuration.isPressed
+        let fill: Color = switch kind {
+        case .secondary:
+            Color.primary.opacity(scheme == .dark ? (pressed ? 0.28 : (hovering ? 0.23 : 0.18)) : (pressed ? 0.18 : (hovering ? 0.14 : 0.10)))
+        case .primary:
+            accent.opacity(pressed ? 0.78 : (hovering ? 0.90 : 1))
+        }
+
+        return configuration.label
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .contentShape(Capsule())
+            .background(Capsule().fill(fill))
+            .overlay(Capsule().strokeBorder(borderColor, lineWidth: 1))
+            .onHover { inside in
+                hovering = inside
+            }
+            .animation(.easeOut(duration: 0.12), value: hovering)
+            .animation(.easeOut(duration: 0.08), value: pressed)
+    }
+
+    private var borderColor: Color {
+        switch kind {
+        case .secondary: Color.primary.opacity(hovering ? 0.24 : 0.12)
+        case .primary: accent.opacity(hovering ? 0.60 : 0)
+        }
     }
 }
 

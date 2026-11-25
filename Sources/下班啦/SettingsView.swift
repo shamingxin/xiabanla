@@ -108,10 +108,17 @@ struct SettingsSidebar: View {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(selected ? accent : (hoveredItem == item ? accent.opacity(0.14) : Color.clear))
             )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(selected ? Color.white.opacity(0.22) : .clear, lineWidth: 0.8)
+            )
+            .shadow(color: selected ? accent.opacity(0.18) : .clear, radius: 5, y: 1)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { hovering in hoveredItem = hovering ? item : (hoveredItem == item ? nil : hoveredItem) }
+        .onHover { hovering in
+            hoveredItem = hovering ? item : (hoveredItem == item ? nil : hoveredItem)
+        }
         .accessibilityLabel(item.rawValue)
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
@@ -158,7 +165,7 @@ struct SettingsView: View {
                     .accessibilityAddTraits(.isHeader)
 
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
+                    VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
                         switch navigation.selectedSection {
                         case .workHours:
                             todaySection
@@ -192,10 +199,6 @@ struct SettingsView: View {
                                 }
                                 .padding(.horizontal, SettingsMetrics.inset)
                                 .padding(.vertical, 12)
-                                SettingsDivider()
-                                SettingsRow("主题色") {
-                                    AccentColorPicker(model: model)
-                                }
                             }
                             // 倒计时样式单独成组：可视化预览网格，参考系统设置「墙纸」，后续加样式直接往枚举里加
                             VStack(alignment: .leading, spacing: 0) {
@@ -220,6 +223,7 @@ struct SettingsView: View {
         .onChange(of: navigation.selectedSection) { section in
             if section != .reminderAnimations {
                 libraryExpansion.collapseAll()
+                navigation.selectedReminderTab = .water
             }
         }
         // 窗口外框圆角自己画：用 15.x SDK 编译时系统只给小圆角，和 macOS 26 系统设置对不上
@@ -240,10 +244,12 @@ struct SettingsView: View {
         .overlay(
             RoundedRectangle(cornerRadius: SettingsMetrics.windowRadius, style: .continuous)
                 .strokeBorder(SettingsPalette.of(model.background).windowStroke, lineWidth: 1)
+                .allowsHitTesting(false)
         )
         .environment(\.settingsPalette, SettingsPalette.of(model.background))
         .environment(\.colorScheme, model.background == .light ? .light : .dark)
-        .environment(\.themeAccent, model.accentColor)
+        // 设置面板的交互色固定为系统蓝；用户原有主题色数据继续保留给不在本轮范围内的视图。
+        .environment(\.themeAccent, SettingsPalette.systemBlue)
         .overlay(alignment: .top) {
             if let toast {
                 ToastView(text: toast)
@@ -343,6 +349,7 @@ struct SettingsView: View {
                             .buttonStyle(.plain)
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(.primary)
+                            .settingsHoverFeedback(cornerRadius: 7)
                     }
                     .padding(.horizontal, SettingsMetrics.inset)
                     .padding(.vertical, 10)
@@ -371,17 +378,26 @@ struct SettingsView: View {
     // MARK: - 喝水提醒
 
     private var reminderSections: some View {
-        VStack(alignment: .leading, spacing: 28) {
+        VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
+            selectedReminderContent
+        }
+    }
+
+    @ViewBuilder
+    private var selectedReminderContent: some View {
+        switch navigation.selectedReminderTab {
+        case .water:
             waterReminderSection
-            SettingsSection("放松提醒") { eggRows }
-            SettingsSection("下班提醒") { offWorkRows }
+        case .rest:
+            SettingsCard { eggRows }
+        case .offWork:
+            SettingsCard { offWorkRows }
         }
     }
 
     private var waterReminderSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SettingsHeader("喝水提醒")
-            VStack(spacing: 10) {
+            VStack(spacing: SettingsMetrics.sectionSpacing) {
                 SettingsCard { waterRegularRows }
                 if reminders.waterEnabled {
                     SettingsCard { waterStickyRows }
@@ -392,7 +408,7 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var waterRegularRows: some View {
-        SettingsRow("动画提醒") { SettingsSwitch(isOn: $reminders.waterEnabled) }
+        SettingsRow("喝水提醒") { SettingsSwitch(isOn: $reminders.waterEnabled) }
         if reminders.waterEnabled {
             SettingsDivider()
             SettingsRow("提醒间隔") {
@@ -427,7 +443,7 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var eggRows: some View {
-            SettingsRow("动画提醒") { SettingsSwitch(isOn: $reminders.eggEnabled) }
+            SettingsRow("休息提醒") { SettingsSwitch(isOn: $reminders.eggEnabled) }
             if reminders.eggEnabled {
                 SettingsDivider()
                 SettingsRow("提醒间隔") {
@@ -443,7 +459,7 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var offWorkRows: some View {
-        SettingsRow("动画提醒") { SettingsSwitch(isOn: $reminders.offWorkEnabled) }
+        SettingsRow("下班提醒") { SettingsSwitch(isOn: $reminders.offWorkEnabled) }
         if reminders.offWorkEnabled {
             SettingsDivider()
             animationLibrary(.offWork)
@@ -454,9 +470,7 @@ struct SettingsView: View {
     private func animationLibrary(_ kind: ReminderKind) -> some View {
         let videos = reminders.videos(kind)
         let selectedCount = reminders.selectedVideoNames(kind).count
-        // SettingsView 自身在注入环境值的同一层级，读取到的是环境默认色；
-        // 这里直接读已持久化的主题色，保证“已选”和缩略图选中态随主题色同步。
-        let accent = model.accentColor
+        let accent = SettingsPalette.systemBlue
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -473,11 +487,13 @@ struct SettingsView: View {
                 }
                 .controlSize(.regular)
                 .disabled(videos.isEmpty)
-                .settingsHoverFeedback(cornerRadius: 7)
+                .buttonStyle(GlassActionButtonStyle())
+                .settingsHoverFeedback(cornerRadius: 14)
                 Button("预览动画") { reminders.preview(kind) }
                     .controlSize(.regular)
                     .disabled(videos.isEmpty)
-                    .settingsHoverFeedback(cornerRadius: 7)
+                    .buttonStyle(GlassActionButtonStyle())
+                    .settingsHoverFeedback(cornerRadius: 14)
             }
 
             if libraryExpansion.isExpanded(kind) {
@@ -581,6 +597,7 @@ private struct ReminderAnimationThumbnail: View {
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
+        .settingsHoverFeedback(cornerRadius: 8)
         .onAppear(perform: loadThumbnail)
         .accessibilityLabel("\(displayName)，\(selected ? "已选中" : "未选中")")
         .accessibilityHint(selected ? "取消后至少需保留一个动画" : "加入随机播放")
@@ -632,6 +649,7 @@ private struct ReminderAnimationThumbnail: View {
     }
 }
 
+/// 参考 macOS 日历的分段控件：深色毛玻璃底、选中时浮起，激活项旁不保留分隔线。
 // MARK: - 系统设置风格的基础组件
 
 /// 一个设置分组：标题 + 卡片 + 可选说明
@@ -712,28 +730,60 @@ struct SettingsCard<Content: View>: View {
                 RoundedRectangle(cornerRadius: SettingsMetrics.cardRadius, style: .continuous)
                     .fill(palette.card)
             )
+            .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
     }
 }
 
 /// 设置面板的轻量悬停反馈：仅提示可点击，不改变布局或主题层级。
 private struct SettingsHoverFeedback: ViewModifier {
-    @Environment(\.themeAccent) private var accent
+    @Environment(\.settingsPalette) private var palette
     @Environment(\.isEnabled) private var isEnabled
     let cornerRadius: CGFloat
     @State private var hovering = false
 
     func body(content: Content) -> some View {
         content
-            .background(
+            // 放在内容上层：此前极淡的背景被玻璃按钮自己的底色覆盖，视觉上等于没有悬停态。
+            .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(isEnabled && hovering ? accent.opacity(0.12) : .clear)
+                    .fill(isEnabled && hovering ? palette.hoverSurface : .clear)
+                    .allowsHitTesting(false)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(isEnabled && hovering ? accent.opacity(0.38) : .clear, lineWidth: 0.8)
+                    .strokeBorder(isEnabled && hovering ? palette.hoverStroke : .clear, lineWidth: 1)
+                    .allowsHitTesting(false)
             )
-            .onHover { hovering = isEnabled && $0 }
+            .onHover {
+                hovering = isEnabled && $0
+            }
             .animation(.easeOut(duration: 0.12), value: hovering)
+    }
+}
+
+/// 次要操作按钮：圆角玻璃底、双层细描边和按下时的轻微压入感。
+private struct GlassActionButtonStyle: ButtonStyle {
+    @Environment(\.settingsPalette) private var palette
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 10)
+            .frame(height: 28)
+            .background(
+                Capsule()
+                    .fill(configuration.isPressed ? palette.chevronBase.opacity(0.72) : palette.chevronBase)
+            )
+            .overlay(
+                Capsule().strokeBorder(Color.white.opacity(0.20), lineWidth: 0.8)
+            )
+            .overlay(
+                Capsule().inset(by: 1).strokeBorder(Color.black.opacity(0.13), lineWidth: 0.5)
+            )
+            .shadow(color: .black.opacity(configuration.isPressed ? 0.04 : 0.14), radius: 3, y: 1)
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 
@@ -817,11 +867,11 @@ struct SettingsPicker<Value: Hashable>: View {
         .frame(height: 28)
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(Color.primary.opacity(pressed ? 0.12 : (hovering ? 0.07 : 0)))
+                .fill(active ? palette.hoverSurface.opacity(pressed ? 1.28 : 1) : .clear)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .strokeBorder(hovering ? Color.primary.opacity(0.18) : .clear, lineWidth: 0.8)
+                .strokeBorder(hovering ? palette.hoverStroke : .clear, lineWidth: 1)
         )
         .animation(.easeOut(duration: 0.12), value: hovering)
         .animation(.easeOut(duration: 0.08), value: pressed)
@@ -867,6 +917,7 @@ private struct UpDownChevron: Shape {
 
 /// 透明的 NSPopUpButton，只负责响应点击、弹菜单，外观由 SwiftUI 绘制
 private struct PopUpOverlay: NSViewRepresentable {
+    @Environment(\.colorScheme) private var colorScheme
     let titles: [String]
     let selectedIndex: Int
     let label: String
@@ -874,8 +925,9 @@ private struct PopUpOverlay: NSViewRepresentable {
     let onHover: (Bool) -> Void
     let onPress: (Bool) -> Void
 
-    func makeNSView(context: Context) -> HoverPopUpButton {
-        let button = HoverPopUpButton(frame: .zero, pullsDown: false)
+    func makeNSView(context: Context) -> HoverPopUpControl {
+        let control = HoverPopUpControl(frame: .zero)
+        let button = control.button
         button.isTransparent = true
         button.isBordered = false
         // 不画系统自带的上下箭头，箭头由 SwiftUI 按设计稿绘制，避免重影
@@ -883,19 +935,29 @@ private struct PopUpOverlay: NSViewRepresentable {
         button.font = .systemFont(ofSize: 13)
         button.target = context.coordinator
         button.action = #selector(Coordinator.changed(_:))
-        return button
+        return control
     }
 
-    func updateNSView(_ button: HoverPopUpButton, context: Context) {
+    func updateNSView(_ control: HoverPopUpControl, context: Context) {
+        let button = control.button
         context.coordinator.parent = self
+        control.hoverFill = colorScheme == .dark
+            ? NSColor.white.withAlphaComponent(0.04)
+            : NSColor.black.withAlphaComponent(0.035)
+        control.hoverStroke = colorScheme == .dark
+            ? NSColor.white.withAlphaComponent(0.025)
+            : NSColor.black.withAlphaComponent(0.025)
         if button.itemTitles != titles {
             button.removeAllItems()
             button.addItems(withTitles: titles)
         }
         if button.indexOfSelectedItem != selectedIndex { button.selectItem(at: selectedIndex) }
         button.setAccessibilityLabel(label)
-        button.onHover = { onHover($0) }
-        button.onPress = { onPress($0) }
+        control.onHover = onHover
+        button.onPress = {
+            control.pressed = $0
+            onPress($0)
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -907,41 +969,77 @@ private struct PopUpOverlay: NSViewRepresentable {
     }
 }
 
+/// 透明的原生菜单按钮不绘制自身；由同一 AppKit 容器在其下方直接绘制可见 hover，
+/// 避免 SwiftUI 与 NSView 覆盖层之间的状态／合成边界吞掉反馈。
+final class HoverPopUpControl: NSView {
+    let button = HoverPopUpButton(frame: .zero, pullsDown: false)
+    var onHover: ((Bool) -> Void)?
+    var hoverFill: NSColor = .clear { didSet { needsDisplay = true } }
+    var hoverStroke: NSColor = .clear { didSet { needsDisplay = true } }
+    var hovered = false { didSet { needsDisplay = true } }
+    var pressed = false { didSet { needsDisplay = true } }
+    private var mouseMonitor: Any?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = false
+        addSubview(button)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let mouseMonitor { NSEvent.removeMonitor(mouseMonitor); self.mouseMonitor = nil }
+        guard window != nil else { setHovered(false); return }
+        mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged, .leftMouseUp]) { [weak self] event in
+            guard let self, let window = self.window else { return event }
+            let point = self.convert(event.locationInWindow, from: nil)
+            let inside = event.window === window && !self.isHiddenOrHasHiddenAncestor && self.bounds.contains(point) && self.visibleRect.contains(point)
+            if inside != self.hovered { self.setHovered(inside) }
+            return event
+        }
+    }
+
+    deinit {
+        if let mouseMonitor { NSEvent.removeMonitor(mouseMonitor) }
+    }
+
+    override var isOpaque: Bool { false }
+
+    override func layout() {
+        super.layout()
+        button.frame = bounds
+    }
+
+    private func setHovered(_ isHovered: Bool) {
+        hovered = isHovered
+        onHover?(isHovered)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 7, yRadius: 7)
+        let fill = hovered ? hoverFill : .clear
+        fill.setFill()
+        path.fill()
+        if hovered {
+            hoverStroke.setStroke()
+            path.lineWidth = 1
+            path.stroke()
+        }
+    }
+}
+
 /// 带悬停 / 按下回调的弹出按钮
 final class HoverPopUpButton: NSPopUpButton {
-    var onHover: ((Bool) -> Void)?
     var onPress: ((Bool) -> Void)?
-    private var trackingArea: NSTrackingArea?
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let trackingArea { removeTrackingArea(trackingArea) }
-        let area = NSTrackingArea(rect: .zero,
-                                  options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
-                                  owner: self)
-        addTrackingArea(area)
-        trackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        onHover?(true)
-        NSCursor.pointingHand.set()
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        onHover?(false)
-        NSCursor.arrow.set()
-    }
 
     /// 菜单弹出期间 super.mouseDown 会阻塞，返回即表示菜单已关闭
     override func mouseDown(with event: NSEvent) {
         onPress?(true)
         super.mouseDown(with: event)
         onPress?(false)
-        if let window {
-            let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
-            onHover?(bounds.contains(point))
-        }
     }
 }
 
@@ -1067,15 +1165,16 @@ struct SettingsDivider: View {
     }
 }
 
-/// 设置面板配色：跟随「背景」选项
-/// - 深色取自系统设置深色模式整体压深一档（窗口 #222120 / 卡片 #2D2B2A）
-/// - 浅色取自系统设置浅色模式（窗口 #FFFFFF / 卡片 #F7F7F7 / 分隔线 #EBEBEB）
+/// 设置面板配色：中性 Apple 灰白 / 深石墨底上的三层玻璃材质。
 struct SettingsPalette {
     var window: Color
     var card: Color
     var separator: Color
     /// 下拉箭头的小圆底
     var chevronBase: Color
+    /// 所有可点击控件共用的前置悬停材质。
+    var hoverSurface: Color
+    var hoverStroke: Color
     var toast: Color
     /// 侧边栏浮起面板底色与描边
     var sidebar: Color
@@ -1087,36 +1186,43 @@ struct SettingsPalette {
     var sidebarTintOpacity: Double
     var nsWindow: NSColor
 
+    /// 设置窗口唯一的交互色，避免用户主题色让轻量界面显得杂乱。
+    static let systemBlue = Color(red: 0.0, green: 0.478, blue: 1.0)
+
     // 参考 macOS 26 系统设置：三层都是半透明，叠在窗口底部的背景模糊上
     // - 侧边栏：底色最透，壁纸颜色透出最明显
     // - 内容区：底色较实，只隐约透一点
     // - 卡片：在内容区上再叠一层很淡的白（深色）/ 黑（浅色），本身不遮挡模糊
     // 底色用中性冷灰，不再用偏暖的 #222120，避免和壁纸色调打架
     static let dark = SettingsPalette(
-        window: Color(red: 0x1F / 255, green: 0x20 / 255, blue: 0x23 / 255),
-        card: Color.white.opacity(0.04),
-        separator: Color.white.opacity(0.08),
-        chevronBase: Color.white.opacity(0.1),
-        toast: Color(white: 0.24),
-        sidebar: Color(red: 0x1F / 255, green: 0x20 / 255, blue: 0x23 / 255),
-        sidebarStroke: Color.white.opacity(0.1),
-        windowStroke: Color.white.opacity(0.14),
-        windowTintOpacity: 0.78,
-        sidebarTintOpacity: 0.3,
-        nsWindow: NSColor(srgbRed: 0x1F / 255, green: 0x20 / 255, blue: 0x23 / 255, alpha: 1))
+        window: Color(red: 0.075, green: 0.082, blue: 0.095),
+        card: Color.white.opacity(0.10),
+        separator: Color.white.opacity(0.10),
+        chevronBase: Color.white.opacity(0.12),
+        hoverSurface: Color.white.opacity(0.04),
+        hoverStroke: Color.white.opacity(0.025),
+        toast: Color(red: 0.13, green: 0.14, blue: 0.16),
+        sidebar: Color(red: 0.075, green: 0.082, blue: 0.095),
+        sidebarStroke: Color.white.opacity(0.14),
+        windowStroke: Color.white.opacity(0.18),
+        windowTintOpacity: 0.54,
+        sidebarTintOpacity: 0.20,
+        nsWindow: NSColor(srgbRed: 0.075, green: 0.082, blue: 0.095, alpha: 1))
 
     static let light = SettingsPalette(
-        window: .white,
-        card: Color.black.opacity(0.035),
-        separator: Color.black.opacity(0.07),
-        chevronBase: Color.black.opacity(0.07),
-        toast: .white,
-        sidebar: .white,
-        sidebarStroke: Color.black.opacity(0.06),
-        windowStroke: Color.black.opacity(0.12),
-        windowTintOpacity: 0.8,
-        sidebarTintOpacity: 0.35,
-        nsWindow: .white)
+        window: Color(red: 0.96, green: 0.955, blue: 0.94),
+        card: Color.white.opacity(0.62),
+        separator: Color.black.opacity(0.08),
+        chevronBase: Color.black.opacity(0.08),
+        hoverSurface: Color.black.opacity(0.035),
+        hoverStroke: Color.black.opacity(0.025),
+        toast: Color(red: 0.96, green: 0.955, blue: 0.94),
+        sidebar: Color(red: 0.96, green: 0.955, blue: 0.94),
+        sidebarStroke: Color.white.opacity(0.58),
+        windowStroke: Color.white.opacity(0.62),
+        windowTintOpacity: 0.58,
+        sidebarTintOpacity: 0.24,
+        nsWindow: NSColor(srgbRed: 0.96, green: 0.955, blue: 0.94, alpha: 1))
 
     static func of(_ background: AppBackground) -> SettingsPalette {
         background == .light ? .light : .dark
@@ -1134,8 +1240,7 @@ extension EnvironmentValues {
     }
 }
 
-/// 主题色环境值：用户在「主题色」行选择的强调色，开关、选中态等统一从这里取
-/// 默认黄色兜底，SettingsView 根部用 model.accentColor 覆盖
+/// 设置内的强调色环境值；根部固定注入系统蓝。
 private struct ThemeAccentKey: EnvironmentKey {
     static let defaultValue = WorkTimerModel.color(fromHex: AccentPreset.yellow.hex)!
 }
@@ -1149,41 +1254,99 @@ extension EnvironmentValues {
 
 /// 无边框时间选择器：只显示数字和右侧上下箭头，数字底下没有输入框
 /// SwiftUI 的 DatePicker 去不掉边框，所以直接包一层 NSDatePicker
-struct TimeField: NSViewRepresentable {
+struct TimeField: View {
     @Binding var date: Date
     var minDate: Date? = nil
     var maxDate: Date? = nil
     var accessibilityLabel: String = "时间"
+    @Environment(\.settingsPalette) private var palette
+    @State private var hovering = false
 
-    func makeNSView(context: Context) -> NSDatePicker {
-        let picker = NSDatePicker()
+    var body: some View {
+        NativeTimeField(date: $date,
+                        minDate: minDate,
+                        maxDate: maxDate,
+                        accessibilityLabel: accessibilityLabel,
+                        onHover: { hovering = $0 })
+            .padding(.horizontal, 6)
+            .frame(height: 28)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(hovering ? palette.hoverSurface : .clear)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .strokeBorder(hovering ? palette.hoverStroke : .clear, lineWidth: 1)
+                    .allowsHitTesting(false)
+            )
+            .animation(.easeOut(duration: 0.12), value: hovering)
+    }
+}
+
+private struct NativeTimeField: NSViewRepresentable {
+    @Binding var date: Date
+    var minDate: Date? = nil
+    var maxDate: Date? = nil
+    var accessibilityLabel: String = "时间"
+    let onHover: (Bool) -> Void
+
+    func makeNSView(context: Context) -> HoverDatePicker {
+        let picker = HoverDatePicker()
         picker.datePickerStyle = .textFieldAndStepper
         picker.datePickerElements = .hourMinute
         picker.isBezeled = false
         picker.isBordered = false
         picker.drawsBackground = false
         picker.focusRingType = .none
+        picker.wantsLayer = true
+        picker.layer?.cornerRadius = 6
         picker.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
         picker.target = context.coordinator
         picker.action = #selector(Coordinator.changed(_:))
         picker.setContentHuggingPriority(.required, for: .horizontal)
         picker.setAccessibilityLabel(accessibilityLabel)
+        picker.onHover = onHover
         return picker
     }
 
-    func updateNSView(_ picker: NSDatePicker, context: Context) {
+    func updateNSView(_ picker: HoverDatePicker, context: Context) {
         context.coordinator.parent = self
         picker.minDate = minDate
         picker.maxDate = maxDate
         if picker.dateValue != date { picker.dateValue = date }
+        picker.onHover = onHover
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     final class Coordinator: NSObject {
-        var parent: TimeField
-        init(_ parent: TimeField) { self.parent = parent }
+        var parent: NativeTimeField
+        init(_ parent: NativeTimeField) { self.parent = parent }
         @objc func changed(_ sender: NSDatePicker) { parent.date = sender.dateValue }
+    }
+}
+
+/// 无边框时间字段仍保留明确的悬停面，和下拉、开关的可交互提示保持一致。
+final class HoverDatePicker: NSDatePicker {
+    var onHover: ((Bool) -> Void)?
+    private var trackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea { removeTrackingArea(trackingArea) }
+        let area = NSTrackingArea(rect: .zero,
+                                  options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                  owner: self)
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        onHover?(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        onHover?(false)
     }
 }
 
@@ -1247,6 +1410,8 @@ enum SettingsMetrics {
     static let sidebarRadius: CGFloat = 20
     /// 内容卡片圆角
     static let cardRadius: CGFloat = 16
+    /// 所有设置页相邻卡片或内容组的垂直间距；卡片内部行距不使用此值。
+    static let sectionSpacing: CGFloat = 16
     /// 右侧内容区宽度（「今日工作」面板按这个宽度设计，不要改）与左右留白
     static let contentWidth: CGFloat = 480
     static let contentPadding: CGFloat = 20
@@ -1292,6 +1457,7 @@ struct BackgroundPicker: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .settingsHoverFeedback(cornerRadius: 10)
         .accessibilityLabel(title)
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
@@ -1389,6 +1555,7 @@ struct AccentColorPicker: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        .settingsHoverFeedback(cornerRadius: 12)
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
@@ -1471,6 +1638,7 @@ struct CountdownStylePicker: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .settingsHoverFeedback(cornerRadius: 10)
         .accessibilityLabel("倒计时样式：\(style.rawValue)")
         .accessibilityAddTraits(selected ? .isSelected : [])
     }

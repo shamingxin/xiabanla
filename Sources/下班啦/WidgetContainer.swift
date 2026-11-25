@@ -50,12 +50,14 @@ struct WidgetContainer<Content: View>: View {
         } else if isLight {
             ZStack {
                 VisualEffectBackground(cornerRadius: WidgetStyle.cornerRadius, light: true)
-                Color.white.opacity(0.6)
+                // 暖灰白玻璃：让桌面色只在边缘和滚动时隐约可感。
+                Color(red: 0.96, green: 0.955, blue: 0.94).opacity(0.42)
             }
         } else {
             ZStack {
                 VisualEffectBackground(cornerRadius: WidgetStyle.cornerRadius)
-                Color.black.opacity(0.55)
+                // 深石墨玻璃：不使用纯黑，保留数字和材质的层次。
+                Color(red: 0.075, green: 0.082, blue: 0.095).opacity(0.44)
             }
         }
     }

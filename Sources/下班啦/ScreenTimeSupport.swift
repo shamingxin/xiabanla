@@ -4,9 +4,28 @@ enum ScreenTimePeriod: String, CaseIterable, Identifiable {
     case day
     case week
 
-    static let defaultPeriod: ScreenTimePeriod = .week
+    static let defaultPeriod: ScreenTimePeriod = .day
 
     var id: String { rawValue }
+}
+
+/// 周视图的饮水摘要独立于 SwiftUI，确保汇总口径和轻量文案都可测试。
+struct WeeklyWaterIntakeSummary: Equatable {
+    let dailyMilliliters: [Int]
+
+    var totalMilliliters: Int { dailyMilliliters.reduce(0, +) }
+
+    /// 周视图固定按七天折算，空白日期也会计入，避免只记录一天时误导成“日均很高”。
+    var averageDailyMilliliters: Int {
+        guard !dailyMilliliters.isEmpty else { return 0 }
+        return Int((Double(totalMilliliters) / Double(dailyMilliliters.count)).rounded())
+    }
+
+    var message: String {
+        guard totalMilliliters > 0 else { return "本周水杯还在待命。" }
+        let cups = max(1, Int((Double(totalMilliliters) / 200).rounded()))
+        return "本周约喝了 \(cups) 杯 200 ml 的办公室水。"
+    }
 }
 
 /// 周图从周一开始排序，并只显示用户选作上班日的日期。

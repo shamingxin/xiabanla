@@ -220,15 +220,17 @@ struct CapsuleStepper: View {
         VStack(spacing: 0) {
             Button(action: up) { Image(systemName: "chevron.up") }
                 .buttonStyle(StepperHalfStyle(palette: palette))
+                .settingsHoverFeedback(cornerRadius: 12)
                 .accessibilityLabel("加一")
             Rectangle().fill(palette.keyDivider).frame(height: 1)
             Button(action: down) { Image(systemName: "chevron.down") }
                 .buttonStyle(StepperHalfStyle(palette: palette))
+                .settingsHoverFeedback(cornerRadius: 12)
                 .accessibilityLabel("减一")
         }
         .frame(width: 44, height: 92)
         .clipShape(Capsule())
-        .overlay(Capsule().strokeBorder(palette.keyStroke, lineWidth: 1))
+        .overlay(Capsule().strokeBorder(palette.keyStroke, lineWidth: 1).allowsHitTesting(false))
         .shadow(color: palette.shadow, radius: 2, y: 1)
     }
 }
