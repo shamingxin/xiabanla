@@ -18,6 +18,16 @@ func auto(_ at: Date, enabled: Bool = true, mode: WorkMode = .flexible, arrived:
                                    weekdays: days, startText: "10:00", latestText: "12:00")
 }
 
+for (saved, expected) in [(nil, "007AFF"), ("0057ff", "007AFF"), ("FED501", "FED501"), ("ABCDEF", "ABCDEF")] as [(String?, String)] {
+    let suite = "xiabanla.accent.tests." + UUID().uuidString
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    defaults.set(saved, forKey: "accentColorHex")
+    check("载入主题色 \(saved ?? "默认")", WorkTimerModel.restoreAccentHex(defaults: defaults) == expected, true)
+    defaults.set("0057FF", forKey: "accentColorHex")
+    check("迁移后可自定义旧蓝色", WorkTimerModel.restoreAccentHex(defaults: defaults) == "0057FF", true)
+}
+
 print("— 倒计时样式 —")
 check("待机时钟样式可选", CountdownStyle.allCases.contains(.standbyClock), true)
 check("待机时钟持久化值", CountdownStyle.standbyClock.rawValue == "待机时钟", true)

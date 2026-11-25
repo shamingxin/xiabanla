@@ -20,8 +20,7 @@ let screenTime = source("Sources/下班啦/ScreenTimeView.swift")
 let happiness = source("Sources/下班啦/HappinessIndexView.swift")
 let screenTimeView = source("Sources/下班啦/ScreenTimeView.swift")
 
-check("设置交互固定使用系统蓝", settings.contains("static let systemBlue") &&
-      settings.contains(".environment(\\.themeAccent, SettingsPalette.systemBlue)"))
+check("设置交互跟随用户主题色", settings.contains(".environment(\\.themeAccent, model.accentColor)"))
 check("设置继续使用窗口后背景模糊", settings.contains("SettingsBlurBackground") &&
       settings.contains("view.blendingMode = .behindWindow"))
 check("设置采用可见的分层玻璃透明度", settings.contains("windowTintOpacity: 0.58") &&
@@ -29,7 +28,8 @@ check("设置采用可见的分层玻璃透明度", settings.contains("windowTin
       settings.contains("windowTintOpacity: 0.54") &&
       settings.contains("sidebarTintOpacity: 0.20"))
 check("设置卡片不使用外轮廓描边", !settings.contains(".strokeBorder(palette.cardStroke, lineWidth: 0.8)"))
-check("设置不再展示用户主题色选择", !settings.contains("SettingsRow(\"主题色\")"))
+check("外观页提供主题色选择器", settings.contains("SettingsRow(\"主题色\")") &&
+      settings.contains("AccentColorPicker(model: model)"))
 check("倒计时继续使用视觉效果背景", widget.contains("VisualEffectBackground") &&
       widget.contains("view.blendingMode = .behindWindow"))
 check("倒计时使用可见的中性玻璃底色", widget.contains("Color(red: 0.96, green: 0.955, blue: 0.94).opacity(0.42)") &&

@@ -140,7 +140,6 @@ struct SettingsView: View {
     @ObservedObject var navigation: SettingsNavigationState
     @ObservedObject var screenTimeState: ScreenTimeState
     @Environment(\.settingsPalette) private var palette
-    @Environment(\.themeAccent) private var accent
     /// 顶部 toast 文案，nil 时隐藏
     @State private var toast: String?
     @State private var toastToken = 0
@@ -200,6 +199,10 @@ struct SettingsView: View {
                                 }
                                 .padding(.horizontal, SettingsMetrics.inset)
                                 .padding(.vertical, 12)
+                                SettingsDivider()
+                                SettingsRow("主题色") {
+                                    AccentColorPicker(model: model)
+                                }
                             }
                             // 倒计时样式单独成组：可视化预览网格，参考系统设置「墙纸」，后续加样式直接往枚举里加
                             VStack(alignment: .leading, spacing: 0) {
@@ -249,8 +252,7 @@ struct SettingsView: View {
         )
         .environment(\.settingsPalette, SettingsPalette.of(model.background))
         .environment(\.colorScheme, model.background == .light ? .light : .dark)
-        // 设置面板的交互色固定为系统蓝；用户原有主题色数据继续保留给不在本轮范围内的视图。
-        .environment(\.themeAccent, SettingsPalette.systemBlue)
+        .environment(\.themeAccent, model.accentColor)
         .overlay(alignment: .top) {
             if let toast {
                 ToastView(text: toast)
@@ -471,7 +473,7 @@ struct SettingsView: View {
     private func animationLibrary(_ kind: ReminderKind) -> some View {
         let videos = reminders.videos(kind)
         let selectedCount = reminders.selectedVideoNames(kind).count
-        let accent = SettingsPalette.systemBlue
+        let accent = model.accentColor
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -1205,9 +1207,6 @@ struct SettingsPalette {
     var sidebarTintOpacity: Double
     var nsWindow: NSColor
 
-    /// 设置窗口唯一的交互色，避免用户主题色让轻量界面显得杂乱。
-    static let systemBlue = Color(red: 0.0, green: 0.478, blue: 1.0)
-
     // 参考 macOS 26 系统设置：三层都是半透明，叠在窗口底部的背景模糊上
     // - 侧边栏：底色最透，壁纸颜色透出最明显
     // - 内容区：底色较实，只隐约透一点
@@ -1259,9 +1258,9 @@ extension EnvironmentValues {
     }
 }
 
-/// 设置内的强调色环境值；根部固定注入系统蓝。
+/// 设置内的强调色环境值，由外观设置中的主题色决定。
 private struct ThemeAccentKey: EnvironmentKey {
-    static let defaultValue = WorkTimerModel.color(fromHex: AccentPreset.yellow.hex)!
+    static let defaultValue = AccentPreset.systemBlue
 }
 
 extension EnvironmentValues {
@@ -1578,7 +1577,7 @@ struct AccentColorPicker: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
-    /// 自定义十六进制输入：失焦或回车时校验，格式不对标红且不生效
+    /// 自定义十六进制输入：回车时校验，格式不对标红且不生效
     /// 当前颜色不是任何预设（即用户在用自定义色）时，描边高亮，和预设色块的选中态呼应
     private var customField: some View {
         let isCustomSelected = selectedPreset == nil

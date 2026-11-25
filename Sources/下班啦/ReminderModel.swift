@@ -100,8 +100,8 @@ final class ReminderModel: ObservableObject {
 
     static let waterIntervals = [5, 10, 15, 30, 45, 60, 90, 120]
     static let eggIntervals = [5, 10, 15, 20, 30, 45, 60, 90, 120]
-    static let waterGoalOptions = [1200, 1500, 1800, 2000, 2500, 3000]
-    static let waterServingOptions = [100, 150, 200, 250, 330, 500]
+    static let waterGoalOptions = [1200, 1500, 1800, 2000, 2500, 3000, 3500, 4000, 4500]
+    static let waterServingOptions = [50, 100, 150, 200, 250, 330, 500]
     /// 触发点过了多久以内仍会补弹（例如正被另一个气泡占着）；超过就跳过，避免启动时补一堆旧提醒
     static let fireWindow: TimeInterval = 120
 

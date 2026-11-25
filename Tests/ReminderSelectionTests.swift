@@ -86,7 +86,11 @@ check("喝水 Tab 的两张卡使用紧凑间距", settingsSource.contains("VSta
 check("休息 Tab 展示专属设置", settingsSource.contains("case .rest:\n            SettingsCard { eggRows }"))
 check("下班 Tab 展示专属设置", settingsSource.contains("case .offWork:\n            SettingsCard { offWorkRows }"))
 check("动画选择行仍叫播放动画", settingsSource.contains("Text(\"播放动画\")"))
-check("动画已选数量固定使用系统蓝", settingsSource.contains("let accent = SettingsPalette.systemBlue"))
+check("动画库使用所选主题色", settingsSource.contains("let accent = model.accentColor"))
+let expectedVessels: [WaterVessel] = [.glass, .glass, .glass, .bucket, .bucket, .jar, .jar, .jar, .kirby]
+check("各档每日目标对应容器", ReminderModel.waterGoalOptions.map(WaterVessel.init(dailyGoal:)) == expectedVessels)
+check("每日目标提供更高档位", ReminderModel.waterGoalOptions.suffix(3) == [3500, 4000, 4500])
+check("单次饮水可选 50 ml", ReminderModel.waterServingOptions.first == 50)
 check("下班提醒接入动画库", settingsSource.contains("animationLibrary(.offWork)"))
 check("深色模块底色使用更浅的叠层", settingsSource.contains("card: Color.white.opacity(0.10)"))
 

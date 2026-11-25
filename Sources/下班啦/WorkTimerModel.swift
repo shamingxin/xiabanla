@@ -18,18 +18,20 @@ enum AppBackground: String, CaseIterable, Identifiable, Codable {
 /// 「已下班」固定绿色不受此影响（CardPalette.overtime 写死）
 enum AccentPreset: String, CaseIterable, Identifiable {
     case neonGreen = "荧光绿"
-    case rhineBlue = "莱茵蓝"
+    case blue = "蓝"
     case yellow = "黄"
     case pink = "粉"
     case red = "红"
 
     var id: String { rawValue }
 
+    static let systemBlue = WorkTimerModel.color(fromHex: AccentPreset.blue.hex)!
+
     /// 预设色值（不含 #）
     var hex: String {
         switch self {
         case .neonGreen: return "39FF14"
-        case .rhineBlue: return "0057FF"
+        case .blue: return "007AFF"
         case .yellow: return "FED501"
         case .pink: return "FF6B9D"
         case .red: return "FF3B30"
@@ -125,14 +127,14 @@ final class WorkTimerModel: ObservableObject {
         }
     }
 
-    /// 主题色十六进制字符串（不含 #），默认黄色，兼容老用户的固定黄色强调色
+    /// 主题色十六进制字符串（不含 #），默认蓝色
     @Published var accentColorHex: String {
         didSet { UserDefaults.standard.set(accentColorHex, forKey: Keys.accentColorHex) }
     }
 
-    /// 主题色实际颜色；十六进制解析失败时退回默认黄色
+    /// 主题色实际颜色；十六进制解析失败时退回默认蓝色
     var accentColor: Color {
-        Self.color(fromHex: accentColorHex) ?? Self.color(fromHex: AccentPreset.yellow.hex)!
+        Self.color(fromHex: accentColorHex) ?? AccentPreset.systemBlue
     }
 
     var accentNSColor: NSColor { NSColor(accentColor) }
@@ -247,7 +249,7 @@ final class WorkTimerModel: ObservableObject {
         if restoredBackground == .image { restoredBackground = .dark }
         self.background = restoredBackground
         self.backgroundImagePath = defaults.string(forKey: Keys.backgroundImagePath)
-        self.accentColorHex = defaults.string(forKey: Keys.accentColorHex) ?? AccentPreset.yellow.hex
+        self.accentColorHex = Self.restoreAccentHex(defaults: defaults)
         self.countdownStyle = CountdownStyle(rawValue: defaults.string(forKey: Keys.countdownStyle) ?? "") ?? .flip
         self.autoStartEnabled = defaults.bool(forKey: Keys.autoStartEnabled)
         self.autoStartWeekdays = (defaults.array(forKey: Keys.autoStartWeekdays) as? [Int]).map(Set.init)
@@ -702,6 +704,19 @@ final class WorkTimerModel: ObservableObject {
     // MARK: - 工具
 
     /// 十六进制字符串（6 位，不含 #）转 Color；格式不对返回 nil
+    /// 旧版按色值保存选项，只迁移一次，让用户之后仍可手动输入旧色值。
+    static func restoreAccentHex(defaults: UserDefaults) -> String {
+        let saved = defaults.string(forKey: Keys.accentColorHex)
+        let migrationKey = "didMigrateBlueAccentPreset"
+        if !defaults.bool(forKey: migrationKey) {
+            if saved?.uppercased() == "0057FF" {
+                defaults.set(AccentPreset.blue.hex, forKey: Keys.accentColorHex)
+            }
+            defaults.set(true, forKey: migrationKey)
+        }
+        return defaults.string(forKey: Keys.accentColorHex) ?? AccentPreset.blue.hex
+    }
+
     static func color(fromHex hex: String) -> Color? {
         var h = hex.trimmingCharacters(in: .whitespacesAndNewlines)
         if h.hasPrefix("#") { h.removeFirst() }

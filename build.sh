@@ -31,7 +31,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 mv build/下班啦-bin "$APP/Contents/MacOS/下班啦"
 mkdir -p "$APP/Contents/Resources"
-cp Assets/AppIcon.icns Assets/MenuBarIcon.png "$APP/Contents/Resources/"
+cp Assets/AppIcon.icns Assets/MenuBarIcon.png Assets/Kirby.gif "$APP/Contents/Resources/"
 # 内置提醒视频（可选）：Assets/Videos/喝水、Assets/Videos/彩蛋
 if [ -d Assets/Videos ]; then cp -R Assets/Videos "$APP/Contents/Resources/"; fi
 cat > "$APP/Contents/Info.plist" << PLIST
@@ -43,8 +43,8 @@ cat > "$APP/Contents/Info.plist" << PLIST
   <key>CFBundleIdentifier</key><string>com.shasha.xiabanla</string>
   <key>CFBundleExecutable</key><string>下班啦</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.9.3</string>
-  <key>CFBundleVersion</key><string>20</string>
+  <key>CFBundleShortVersionString</key><string>1.9.4</string>
+  <key>CFBundleVersion</key><string>21</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>CFBundleIconFile</key><string>AppIcon</string>

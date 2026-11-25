@@ -302,7 +302,7 @@ private struct WaterIntakeCard: View {
     let showQuickAdd: Bool
     let canAdd: Bool
     let onAdd: (Int) -> Void
-    @Environment(\.themeAccent) private var accent
+    private let waterBlue = AccentPreset.systemBlue
     @Environment(\.settingsPalette) private var palette
     @Environment(\.colorScheme) private var scheme
 
@@ -340,26 +340,17 @@ private struct WaterIntakeCard: View {
                 .font(.system(size: 12))
                 .accessibilityElement(children: .combine)
                 Spacer(minLength: 0)
-                WaterGlass(progress: progress, moving: period == .day && canAdd, color: accent)
-                    .frame(width: 80, height: 110)
-                    .overlay {
-                        if period == .day {
-                            Text("\(daySummary.percentage)%")
-                                .font(.system(size: 16, weight: .semibold, design: .rounded))
-                                .monospacedDigit()
-                                .foregroundStyle(progress >= 0.48 ? Color.white : (scheme == .dark ? Color.white : Color.primary))
-                                .shadow(color: progress >= 0.48 ? .black.opacity(0.35) : .clear, radius: 2)
-                                .accessibilityHidden(true)
-                        }
-                    }
+                WaterVesselView(kind: WaterVessel(dailyGoal: daySummary.goalMilliliters),
+                                progress: progress, moving: period == .day && canAdd,
+                                percentage: period == .day ? daySummary.percentage : nil)
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(period == .day ? "饮水目标完成 \(daySummary.percentage)%" : "本周饮水进度")
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, 2)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 16)
             .background {
-                LinearGradient(colors: [.clear, accent.opacity(scheme == .dark ? 0.15 : 0.09)],
+                LinearGradient(colors: [.clear, waterBlue.opacity(scheme == .dark ? 0.15 : 0.09)],
                                startPoint: .leading, endPoint: .trailing)
             }
 
@@ -377,7 +368,7 @@ private struct WaterIntakeCard: View {
                                         .foregroundStyle(canAdd ? Color.white : Color.secondary)
                                 }
                                 .frame(maxWidth: .infinity, minHeight: 28)
-                                .background(RoundedRectangle(cornerRadius: 7).fill(canAdd ? accent.opacity(scheme == .dark ? 0.82 : 0.9) : palette.card))
+                                .background(RoundedRectangle(cornerRadius: 7).fill(canAdd ? waterBlue.opacity(scheme == .dark ? 0.82 : 0.9) : palette.card))
                                 .overlay {
                                     RoundedRectangle(cornerRadius: 7)
                                         .fill(Color.white.opacity(canAdd && hoveredAmount == amount ? 0.20 : 0))
@@ -403,101 +394,6 @@ private struct WaterIntakeCard: View {
         }
         .background(palette.card)
         .clipShape(RoundedRectangle(cornerRadius: SettingsMetrics.cardRadius, style: .continuous))
-    }
-}
-
-/// 以杯口、收窄的杯壁和实心杯底界定液体的可用空间。
-private struct GlassOutline: Shape {
-    func path(in rect: CGRect) -> Path {
-        let w = rect.width, h = rect.height
-        return Path { path in
-            path.move(to: CGPoint(x: 0, y: 0.05*h))
-            path.addQuadCurve(to: CGPoint(x: w, y: 0.05*h), control: CGPoint(x: w/2, y: -0.035*h))
-            path.addLine(to: CGPoint(x: 0.90*w, y: 0.90*h))
-            path.addQuadCurve(to: CGPoint(x: 0.80*w, y: 0.97*h), control: CGPoint(x: 0.89*w, y: 0.96*h))
-            path.addQuadCurve(to: CGPoint(x: 0.20*w, y: 0.97*h), control: CGPoint(x: w/2, y: 1.01*h))
-            path.addQuadCurve(to: CGPoint(x: 0.10*w, y: 0.90*h), control: CGPoint(x: 0.11*w, y: 0.96*h))
-            path.closeSubpath()
-        }
-    }
-}
-
-private struct WaterSurface: Shape {
-    var level: Double
-    let phase: Double
-
-    var animatableData: Double {
-        get { level }
-        set { level = newValue }
-    }
-
-    func path(in rect: CGRect) -> Path {
-        guard level > 0 else { return Path() }
-        let baseline = rect.height * (0.995 - 0.89 * level)
-        let amplitude = min(2.8, level * rect.height * 0.45)
-        return Path { path in
-            path.move(to: CGPoint(x: 0, y: rect.maxY))
-            for i in 0...32 {
-                let fraction = Double(i) / 32
-                let y = baseline + amplitude * sin(fraction * 2 * .pi + phase)
-                path.addLine(to: CGPoint(x: rect.width * fraction, y: y))
-            }
-            path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-            path.closeSubpath()
-        }
-    }
-}
-
-private struct WaterGlass: View {
-    let progress: Double
-    let moving: Bool
-    let color: Color
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.controlActiveState) private var activeState
-    @Environment(\.colorScheme) private var scheme
-
-    var body: some View {
-        let glint = Color(nsColor: .white)
-        let edge = scheme == .dark ? glint.opacity(0.48) : color.opacity(0.35)
-        ZStack {
-            Ellipse().fill(color.opacity(0.16))
-                .frame(width: 65, height: 7).blur(radius: 3).offset(y: 53)
-            GlassOutline().fill(LinearGradient(colors: [color.opacity(0.22), color.opacity(0.04), color.opacity(0.16)],
-                                               startPoint: .leading, endPoint: .trailing))
-            TimelineView(.animation(minimumInterval: 1.0 / 24, paused: reduceMotion || !moving || progress == 0 || activeState == .inactive)) { context in
-                let phase = reduceMotion || !moving ? 0 : context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 5) * 2 * .pi / 5
-                ZStack {
-                    WaterSurface(level: progress, phase: phase + 2.3)
-                        .fill(Color.cyan.opacity(0.65))
-                    WaterSurface(level: progress, phase: phase)
-                        .fill(LinearGradient(colors: [.cyan, color], startPoint: .topLeading, endPoint: .bottomTrailing))
-                }
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.45), value: progress)
-            }
-            .clipShape(GlassOutline())
-            Canvas { context, size in
-                let w = size.width, h = size.height
-                var markings = Path()
-                for index in 1...5 {
-                    let y = h * Double(index + 1) / 8
-                    let x = w * (0.86 - 0.06 * y / h)
-                    markings.move(to: CGPoint(x: x, y: y))
-                    markings.addLine(to: CGPoint(x: x - (index.isMultiple(of: 2) ? 5 : 8), y: y))
-                }
-                context.stroke(markings, with: .color(edge), lineWidth: 1)
-                var reflection = Path()
-                reflection.move(to: CGPoint(x: w * 0.09, y: h * 0.18))
-                reflection.addLine(to: CGPoint(x: w * 0.12, y: h * 0.48))
-                context.stroke(reflection, with: .color(glint.opacity(0.56)), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-            }
-            GlassOutline().stroke(edge, lineWidth: 0.85)
-            VStack {
-                Ellipse().fill(glint.opacity(0.08)).overlay(Ellipse().stroke(edge, lineWidth: 0.85))
-                    .frame(height: 9).padding(.top, 1)
-                Spacer()
-            }
-        }
-        .accessibilityHidden(true)
     }
 }
 

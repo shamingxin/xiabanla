@@ -136,7 +136,7 @@ enum TodayStyle {
 }
 
 /// 面板配色：跟设置窗口同一色系（深色 #222120 / 卡片 #2D2B2A），机身只比卡片亮一档
-/// 强调色 #FED501（黄），只用在下班时间、选中段和 ✓ 键上
+/// 主题强调色，只用在下班时间、选中段和 ✓ 键上
 struct TodayPalette {
     var shellTop: Color
     var shellBottom: Color
@@ -163,17 +163,12 @@ struct TodayPalette {
     private static func hex(_ v: UInt32) -> Color {
         Color(red: Double((v >> 16) & 0xFF) / 255, green: Double((v >> 8) & 0xFF) / 255, blue: Double(v & 0xFF) / 255)
     }
-    /// 默认强调色（黄）：兜底值，用户没有设置主题色时使用
-    private static let defaultAccentHex: UInt32 = 0xFED501
-    private static let defaultNSAccent = NSColor(srgbRed: 0xFE / 255, green: 0xD5 / 255, blue: 0x01 / 255, alpha: 1)
-
-    /// 用默认黄色强调色构造，仅用于静态占位（如 TimeDisplayView 的属性初始值）
-    static let dark = TodayPalette(scheme: .dark, accent: hex(defaultAccentHex), nsAccent: defaultNSAccent)
-    static let light = TodayPalette(scheme: .light, accent: hex(defaultAccentHex), nsAccent: defaultNSAccent)
+    static let dark = TodayPalette(scheme: .dark, accent: AccentPreset.systemBlue, nsAccent: NSColor(AccentPreset.systemBlue))
+    static let light = TodayPalette(scheme: .light, accent: AccentPreset.systemBlue, nsAccent: NSColor(AccentPreset.systemBlue))
 
     /// - Parameters:
     ///   - scheme: 深浅模式
-    ///   - accent: 用户在设置里选的主题色；默认黄色
+    ///   - accent: 用户在设置里选的主题色；默认蓝色
     ///   - nsAccent: 同上的 NSColor 版本，供 AppKit 组件使用
     init(scheme: ColorScheme, accent: Color, nsAccent: NSColor) {
         let isLight = scheme == .light
