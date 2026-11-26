@@ -1,3 +1,4 @@
+import ImageIO
 import AppKit
 import AVFoundation
 import SwiftUI
@@ -33,6 +34,32 @@ enum BubbleMetrics {
         CGRect(x: sideMargin, y: trailHeight, width: cloudWidth, height: cloudHeight)
     }
 
+}
+
+/// 保持素材比例，并以接近原方形云朵的面积展示。
+struct BubbleLayout {
+    let cloudSize = CGSize(width: BubbleMetrics.cloudWidth, height: BubbleMetrics.cloudHeight)
+    let hasActions: Bool
+
+    init(mediaSize: CGSize, hasActions: Bool, maximumSize: CGSize = CGSize(width: 320, height: 320)) {
+        self.hasActions = hasActions
+    }
+
+    var panelSize: CGSize { BubbleMetrics.panelSize(hasActions: hasActions) }
+    var cloudRect: CGRect { BubbleMetrics.cloudRect }
+
+    static func mediaSize(_ url: URL) -> CGSize {
+        if url.pathExtension.lowercased() == "gif",
+           let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+           let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+           let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
+           let height = properties[kCGImagePropertyPixelHeight] as? NSNumber {
+            return CGSize(width: width.doubleValue, height: height.doubleValue)
+        }
+        guard let track = AVURLAsset(url: url).tracks(withMediaType: .video).first else { return .zero }
+        let size = track.naturalSize.applying(track.preferredTransform)
+        return CGSize(width: abs(size.width), height: abs(size.height))
+    }
 }
 
 /// 强制提醒的明确回应。无动作时沿用普通动画的 × / 自动收起行为。
@@ -115,12 +142,14 @@ final class BubbleController {
     // MARK: - 布局与展示
 
     private func present(_ url: URL, loop: Bool, actions: BubbleActions?) {
-        let size = BubbleMetrics.panelSize(hasActions: actions != nil)
-
         // 大圈尽量居中在图标正下方；靠近屏幕边缘时整体平移，小圈仍从图标处吐出
         let anchor = anchorProvider()
         let screen = NSScreen.screens.first { anchor.map($0.frame.intersects) ?? false } ?? NSScreen.main
         let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let layout = BubbleLayout(mediaSize: BubbleLayout.mediaSize(url), hasActions: actions != nil,
+                                  maximumSize: CGSize(width: min(320, visible.width - 36),
+                                                      height: min(320, visible.height - 120)))
+        let size = layout.panelSize
         let tipX = anchor?.midX ?? (visible.maxX - 60)
         let tipY = anchor.map { $0.minY - 2 } ?? visible.maxY
         var originX = tipX - size.width / 2
@@ -130,7 +159,8 @@ final class BubbleController {
         // 云朵不会被额外的面板高度顶到菜单栏里，新增区域只会向下延展。
         let origin = NSPoint(x: originX, y: tipY - size.height)
 
-        let player = AVPlayer(url: url)
+        let isGIF = url.pathExtension.lowercased() == "gif"
+        let player = isGIF ? AVPlayer() : AVPlayer(url: url)
         player.isMuted = true
         player.actionAtItemEnd = .pause
         player.preventsDisplaySleepDuringVideoPlayback = false
@@ -138,11 +168,15 @@ final class BubbleController {
 
         let stage = BubbleStage()
         self.stage = stage
-        let view = BubbleView(stage: stage, tipX: tipInPanel, actions: actions, onClose: { [weak self] in self?.dismiss() }, onAction: { [weak self] accepted in
+        let view = BubbleView(stage: stage, layout: layout, tipX: tipInPanel, actions: actions, onClose: { [weak self] in self?.dismiss() }, onAction: { [weak self] accepted in
             actions?.handle(accepted)
             self?.dismiss()
         }) {
-            PlayerLayerView(player: player)
+            if isGIF {
+                AnimatedReminderImage(url: url)
+            } else {
+                PlayerLayerView(player: player)
+            }
         }
         let hosting = NSHostingView(rootView: view)
         hosting.frame = NSRect(origin: .zero, size: size)
@@ -162,6 +196,11 @@ final class BubbleController {
         timeline.append((cloudAt + 0.2, { player.play() }))
         for (delay, action) in timeline { schedule(after: delay, action) }
 
+        if isGIF, !loop {
+            schedule(after: cloudAt + 0.2 + AnimatedReminderImage.duration(url) + BubbleMetrics.lingerAfterEnd) { [weak self] in
+                self?.dismiss()
+            }
+        }
         let center = NotificationCenter.default
         observe(center, .AVPlayerItemDidPlayToEndTime, object: player.currentItem) { [weak self, weak player] _ in
             if loop {
@@ -227,6 +266,7 @@ final class BubblePanel: NSPanel {
 /// 思考泡：小圈从菜单栏图标往下排，越来越大，连到云朵大圈；动画裁在云朵里
 struct BubbleView<Content: View>: View {
     @ObservedObject var stage: BubbleStage
+    var layout = BubbleLayout(mediaSize: CGSize(width: 195, height: 195), hasActions: false)
     let tipX: CGFloat
     let actions: BubbleActions?
     let onClose: () -> Void
@@ -236,8 +276,8 @@ struct BubbleView<Content: View>: View {
     private static var pop: Animation { .spring(response: 0.3, dampingFraction: 0.6) }
 
     var body: some View {
-        let size = BubbleMetrics.panelSize(hasActions: actions != nil)
-        let cloud = BubbleMetrics.cloudRect
+        let size = layout.panelSize
+        let cloud = layout.cloudRect
         let trailEnd = CGPoint(x: cloud.midX, y: cloud.minY + 2)
         let cloudShown = stage.step > BubbleMetrics.dots.count
 
@@ -276,7 +316,7 @@ struct BubbleView<Content: View>: View {
                     BubbleActionButton(title: actions.primaryTitle, filled: true) { onAction(true) }
                     BubbleActionButton(title: actions.secondaryTitle, filled: false) { onAction(false) }
                 }
-                .frame(width: cloud.width - 20, height: BubbleMetrics.actionAreaHeight - 8)
+                .frame(width: max(cloud.width, 195) - 20, height: BubbleMetrics.actionAreaHeight - 8)
                 .position(x: cloud.midX, y: cloud.maxY + BubbleMetrics.actionAreaHeight / 2)
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
@@ -416,7 +456,7 @@ struct PlayerLayerView: NSViewRepresentable {
         let view = NSView()
         view.wantsLayer = true
         let layer = AVPlayerLayer(player: player)
-        layer.videoGravity = .resizeAspectFill
+        layer.videoGravity = .resizeAspect
         layer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
         view.layer = layer
         return view
@@ -424,5 +464,31 @@ struct PlayerLayerView: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {
         (nsView.layer as? AVPlayerLayer)?.player = player
+    }
+}
+
+
+private struct AnimatedReminderImage: NSViewRepresentable {
+    let url: URL
+
+    func makeNSView(context: Context) -> NSImageView {
+        let view = NSImageView()
+        view.imageScaling = .scaleProportionallyUpOrDown
+        view.image = NSImage(contentsOf: url)
+        view.animates = true
+        return view
+    }
+
+    func updateNSView(_ view: NSImageView, context: Context) {}
+
+    static func duration(_ url: URL) -> TimeInterval {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return 1 }
+        return (0..<CGImageSourceGetCount(source)).reduce(0) { total, index in
+            let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any]
+            let gif = properties?[kCGImagePropertyGIFDictionary] as? [CFString: Any]
+            let delay = gif?[kCGImagePropertyGIFUnclampedDelayTime] as? Double
+                ?? gif?[kCGImagePropertyGIFDelayTime] as? Double ?? 0.1
+            return total + (delay < 0.02 ? 0.1 : delay)
+        }
     }
 }

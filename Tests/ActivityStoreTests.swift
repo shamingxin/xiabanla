@@ -153,6 +153,16 @@ check("没有真实记录不虚构到岗时间", unavailableSummary.arrivalTime,
 check("没有真实记录不虚构下班时间", unavailableSummary.departure, .unavailable)
 check("没有真实记录不虚构加班时长", unavailableSummary.overtimeSeconds, nil)
 
+let emptyToday = DailyPresenceSummary.make(segments: [], plannedSeconds: 9 * 3600,
+                                           now: date(26, 5), isCurrentWorkday: true)
+check("新工作日还未到岗时累计为零", emptyToday.creditedSeconds, 0)
+check("历史日期缺少片段时保留未记录", unavailableSummary.creditedSeconds, nil)
+let firstMinute = DailyPresenceSummary.make(
+    segments: [OfficePresenceSegment(id: 1, workday: "2026-11-26", startedAt: date(26, 10), endedAt: nil)],
+    plannedSeconds: nil, now: date(26, 10).addingTimeInterval(59), isCurrentWorkday: true)
+check("刚开始的前 59 秒累计不足一分钟", firstMinute.creditedSeconds, 59)
+check("新工作日尚未饮水时饮水量为零", store.waterMilliliters(workday: "2026-11-26"), 0)
+
 let noPlanSummary = DailyPresenceSummary.make(
     segments: [OfficePresenceSegment(id: 1, workday: "2026-11-14", startedAt: date(14, 9), endedAt: date(14, 20))],
     plannedSeconds: nil, now: date(14, 22), isCurrentWorkday: false)
@@ -170,6 +180,20 @@ check("按天摘要未加班显示横线", DailyPresenceMetricText(summary: Dail
     segments: [OfficePresenceSegment(id: 1, workday: "2026-11-14", startedAt: date(14, 9), endedAt: date(14, 17))],
     plannedSeconds: 9 * 3600, now: date(14, 22), isCurrentWorkday: false)).overtime, "—")
 check("在岗时间默认显示当天", ScreenTimePeriod.defaultPeriod, .day)
+let selection = ScreenTimeState()
+let nov25 = date(25, 0), nov26 = date(26, 0), nov27 = date(27, 0)
+check("启动当天显示当前工作日", selection.selectedDay(currentWorkday: nov25), nov25)
+check("跨工作日自动显示 26 日", selection.selectedDay(currentWorkday: nov26), nov26)
+selection.shift(-1, currentWorkday: nov26)
+check("查看历史时跨天仍显示原日期", selection.selectedDay(currentWorkday: nov27), nov25)
+selection.showCurrent()
+check("点今天后继续跟随工作日", selection.selectedDay(currentWorkday: nov27), nov27)
+selection.period = .week
+selection.shift(-1, currentWorkday: nov26)
+check("翻到上周后保留所选周", selection.selectedDay(currentWorkday: nov27), date(19, 0))
+selection.shift(1, currentWorkday: nov26)
+check("翻回当前日期后恢复跟随", selection.selectedDay(currentWorkday: nov27), nov27)
+
 let weeklyWater = WeeklyWaterIntakeSummary(dailyMilliliters: [900, 1200, 0, 500, 0, 0, 0], workedDays: 3)
 check("周饮水累计所有日期", weeklyWater.totalMilliliters, 2600)
 check("周饮水按实际计时天数平均", weeklyWater.averageDailyMilliliters, 867)

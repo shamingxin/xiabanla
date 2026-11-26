@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 enum ScreenTimePeriod: String, CaseIterable, Identifiable {
     case day
@@ -7,6 +8,27 @@ enum ScreenTimePeriod: String, CaseIterable, Identifiable {
     static let defaultPeriod: ScreenTimePeriod = .day
 
     var id: String { rawValue }
+}
+
+final class ScreenTimeState: ObservableObject {
+    @Published var period = ScreenTimePeriod.defaultPeriod
+    // 只保存手动选中的日期。「今天」随当前工作日移动，休眠跨天也能直接恢复。
+    @Published private var pinnedDay: Date?
+
+    func selectedDay(currentWorkday: Date) -> Date {
+        pinnedDay ?? currentWorkday
+    }
+
+    func showCurrent() {
+        pinnedDay = nil
+    }
+
+    func shift(_ amount: Int, currentWorkday: Date) {
+        let days = period == .day ? amount : amount * 7
+        guard let day = Calendar.current.date(byAdding: .day, value: days,
+                                               to: selectedDay(currentWorkday: currentWorkday)) else { return }
+        pinnedDay = day == currentWorkday ? nil : day
+    }
 }
 
 /// 周视图的饮水摘要独立于 SwiftUI，确保汇总口径和轻量文案都可测试。
@@ -85,7 +107,7 @@ struct DailyPresenceSummary: Equatable {
                      now: Date, isCurrentWorkday: Bool) -> DailyPresenceSummary {
         guard !segments.isEmpty else {
             return DailyPresenceSummary(arrivalTime: nil, departure: .unavailable,
-                                        creditedSeconds: nil, overtimeSeconds: nil)
+                                        creditedSeconds: isCurrentWorkday ? 0 : nil, overtimeSeconds: nil)
         }
 
         let hasOpenSegment = segments.contains { $0.endedAt == nil }

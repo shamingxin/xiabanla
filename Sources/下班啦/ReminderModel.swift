@@ -1,5 +1,7 @@
 import Foundation
 import Combine
+import AVFoundation
+import ImageIO
 
 /// 气泡提醒的两种类型，各自对应一个视频文件夹
 enum ReminderKind: String, CaseIterable, Hashable {
@@ -16,17 +18,127 @@ enum ReminderKind: String, CaseIterable, Hashable {
     }
 }
 
-/// 视频素材：只读取打包在 App 里的 Resources/Videos/{喝水,彩蛋}
-/// 视频由开发者放进项目的 Assets/Videos 后重新打包，使用者无法自行添加
+/// 内置素材与当前用户导入的本地素材。
 enum VideoLibrary {
-    static let extensions: Set<String> = ["mp4", "mov", "m4v"]
+    static let extensions: Set<String> = ["mp4", "mov", "m4v", "gif"]
 
     private static let bundledVideos: [ReminderKind: [URL]] = Dictionary(
         uniqueKeysWithValues: ReminderKind.allCases.map { ($0, loadVideos($0)) }
     )
 
     static func videos(_ kind: ReminderKind) -> [URL] {
-        bundledVideos[kind] ?? []
+        let imported = (try? FileManager.default.contentsOfDirectory(at: userFolder(kind),
+            includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+        let hidden = Set(UserDefaults.standard.stringArray(forKey: "reminder.\(kind.rawValue).hiddenVideos") ?? [])
+        return ((bundledVideos[kind] ?? []) + imported.filter { extensions.contains($0.pathExtension.lowercased()) })
+            .filter { !hidden.contains(identifier($0, kind: kind)) }
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+    }
+
+    static func identifier(_ url: URL, kind: ReminderKind) -> String {
+        let imported = url.deletingLastPathComponent().standardizedFileURL == userFolder(kind).standardizedFileURL
+        return (imported ? "custom:" : "bundled:") + url.lastPathComponent
+    }
+
+    static func displayName(_ url: URL, kind: ReminderKind, defaults: UserDefaults = .standard) -> String {
+        let names = defaults.dictionary(forKey: "reminder.\(kind.rawValue).videoNames") as? [String: String] ?? [:]
+        return names[identifier(url, kind: kind)] ?? url.deletingPathExtension().lastPathComponent
+    }
+
+    static func rename(_ url: URL, kind: ReminderKind, name: String, defaults: UserDefaults = .standard) {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        let key = "reminder.\(kind.rawValue).videoNames"
+        var names = defaults.dictionary(forKey: key) as? [String: String] ?? [:]
+        names[identifier(url, kind: kind)] = name
+        defaults.set(names, forKey: key)
+    }
+
+    static func delete(_ url: URL, kind: ReminderKind, defaults: UserDefaults = .standard) throws {
+        let id = identifier(url, kind: kind)
+        if id.hasPrefix("custom:") {
+            try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+        } else {
+            let key = "reminder.\(kind.rawValue).hiddenVideos"
+            var hidden = Set(defaults.stringArray(forKey: key) ?? [])
+            hidden.insert(id)
+            defaults.set(Array(hidden), forKey: key)
+        }
+        let key = "reminder.\(kind.rawValue).videoNames"
+        var names = defaults.dictionary(forKey: key) as? [String: String] ?? [:]
+        names.removeValue(forKey: id)
+        defaults.set(names, forKey: key)
+    }
+
+    static func userFolder(_ kind: ReminderKind) -> URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("下班啦/ImportedVideos/\(kind.rawValue)", isDirectory: true)
+    }
+
+    static func importFile(_ source: URL, for kind: ReminderKind) throws -> URL {
+        let ext = source.pathExtension.lowercased()
+        guard extensions.contains(ext) else { throw CocoaError(.fileReadCorruptFile) }
+        if ext == "gif" {
+            guard let image = CGImageSourceCreateWithURL(source as CFURL, nil),
+                  CGImageSourceGetCount(image) > 1,
+                  CGImageSourceCreateImageAtIndex(image, 0, nil) != nil else {
+                throw CocoaError(.fileReadCorruptFile)
+            }
+        } else {
+            let asset = AVURLAsset(url: source)
+            guard asset.isPlayable, !asset.tracks(withMediaType: .video).isEmpty else {
+                throw CocoaError(.fileReadCorruptFile)
+            }
+        }
+        let folder = userFolder(kind)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let existing = Set((videos(kind) + (bundledVideos[kind] ?? [])).map { $0.lastPathComponent.lowercased() })
+        let optimized = ext == "gif" ? nil : try compressedVideo(source, in: folder)
+        defer { if let optimized { try? FileManager.default.removeItem(at: optimized) } }
+        let storedSource = optimized ?? source
+        let storedExtension = storedSource.pathExtension.lowercased()
+        let stem = source.deletingPathExtension().lastPathComponent
+        var name = "\(stem).\(storedExtension)"
+        var suffix = 2
+        while existing.contains(name.lowercased()) {
+            name = "\(stem) (\(suffix)).\(storedExtension)"
+            suffix += 1
+        }
+        let destination = folder.appendingPathComponent(name)
+        try FileManager.default.copyItem(at: storedSource, to: destination)
+        return destination
+    }
+
+    /// 在导入后台队列执行。仅保留更小的转码结果，临时文件不进入素材列表。
+    private static func compressedVideo(_ source: URL, in folder: URL) throws -> URL? {
+        let asset = AVURLAsset(url: source)
+        let originalSize = try source.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        guard let track = asset.tracks(withMediaType: .video).first else { return nil }
+        let size = track.naturalSize.applying(track.preferredTransform)
+        guard originalSize > 5 * 1024 * 1024 || max(abs(size.width), abs(size.height)) > 640 else {
+            return nil
+        }
+        let composition = AVMutableComposition()
+        guard let video = composition.addMutableTrack(withMediaType: .video,
+                                                      preferredTrackID: kCMPersistentTrackID_Invalid) else { return nil }
+        try video.insertTimeRange(CMTimeRange(start: .zero, duration: asset.duration), of: track, at: .zero)
+        video.preferredTransform = track.preferredTransform
+        guard let exporter = AVAssetExportSession(asset: composition, presetName: AVAssetExportPreset640x480) else {
+            return nil
+        }
+        let temporary = folder.appendingPathComponent(".compress-\(UUID().uuidString).mp4")
+        exporter.outputURL = temporary
+        exporter.outputFileType = .mp4
+        exporter.shouldOptimizeForNetworkUse = false
+        let completion = DispatchSemaphore(value: 0)
+        exporter.exportAsynchronously { completion.signal() }
+        completion.wait()
+        let compressedSize = (try? temporary.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        guard exporter.status == .completed, compressedSize > 0, compressedSize < originalSize else {
+            try? FileManager.default.removeItem(at: temporary)
+            return nil
+        }
+        return temporary
     }
 
     private static func loadVideos(_ kind: ReminderKind) -> [URL] {
@@ -226,6 +338,26 @@ final class ReminderModel: ObservableObject {
     /// 当前类别的全部内置视频，按文件名稳定排序。
     func videos(_ kind: ReminderKind) -> [URL] { VideoLibrary.videos(kind) }
 
+    func includeImportedVideos(_ urls: [URL], for kind: ReminderKind) {
+        let selected = selectedVideoNames(kind).union(urls.map(\.lastPathComponent))
+        UserDefaults.standard.set(Array(selected).sorted(), forKey: Keys.selectedVideos(kind))
+        refreshVideoLibrary()
+    }
+
+    func renameVideo(_ url: URL, kind: ReminderKind, name: String) {
+        objectWillChange.send()
+        VideoLibrary.rename(url, kind: kind, name: name)
+    }
+
+    func deleteVideo(_ url: URL, kind: ReminderKind) throws {
+        try VideoLibrary.delete(url, kind: kind)
+        let remaining = videos(kind)
+        let selected = VideoSelectionState.selectedNames(
+            saved: Array(selectedVideoNames(kind).subtracting([url.lastPathComponent])), available: remaining)
+        UserDefaults.standard.set(Array(selected).sorted(), forKey: Keys.selectedVideos(kind))
+        refreshVideoLibrary()
+    }
+
     func selectedVideoNames(_ kind: ReminderKind) -> Set<String> {
         selectedVideoNamesByKind[kind] ?? VideoSelectionState.selectedNames(saved: nil, available: videos(kind))
     }
@@ -248,7 +380,11 @@ final class ReminderModel: ObservableObject {
     /// 设置面板里的「预览」：立即播放一个，替换正在播的气泡
     func preview(_ kind: ReminderKind) {
         guard let url = videoProvider(kind) else { return }
-        // 预览只是看看动画内容，不常驻
+        preview(url)
+    }
+
+    func preview(_ url: URL) {
+        // 单项预览直接使用所点素材，也允许预览尚未勾选的动画。
         _ = present?(url, true, false, nil, nil)
     }
 

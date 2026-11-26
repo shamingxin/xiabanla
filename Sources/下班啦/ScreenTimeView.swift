@@ -1,10 +1,5 @@
 import SwiftUI
 
-final class ScreenTimeState: ObservableObject {
-    @Published var period: ScreenTimePeriod = ScreenTimePeriod.defaultPeriod
-    @Published var selectedDate = WorkTimerModel.workdayBase(for: Date())
-}
-
 enum ReminderTab: String, CaseIterable {
     case water = "喝水"
     case rest = "休息"
@@ -74,7 +69,7 @@ struct ScreenTimeView: View {
                                 daySummary: waterIntakeSummary,
                                 weeklySummary: weeklyWaterIntakeSummary,
                                 showQuickAdd: period == .day,
-                                canAdd: isCurrentWaterFocusDay,
+                                canAdd: isCurrentWorkdaySelected,
                                 onAdd: { reminders.addWater($0) })
                     .id(selectedDay)
               }
@@ -102,7 +97,7 @@ struct ScreenTimeView: View {
                 detailColumn("下班时间", value: detail.departure)
                 if reminders.waterTrackingEnabled {
                     let amount = activity.waterMilliliters(workday: workdayKey(forCalendarDay: date))
-                    detailColumn("饮水量", value: amount > 0 ? "\(amount.formatted()) ml" : "未记录")
+                    detailColumn("饮水量", value: date == currentWorkday || amount > 0 ? "\(amount.formatted()) ml" : "未记录")
                 }
             }
         }
@@ -118,13 +113,13 @@ struct ScreenTimeView: View {
     }
 
     private var period: Period { state.period }
-    private var selectedDate: Date { state.selectedDate }
-    private var selectedDay: Date { calendar.startOfDay(for: selectedDate) }
-    private var primaryTitle: String { period == .day ? (calendar.isDateInToday(selectedDay) ? "今日在岗时间" : "\(selectedDay.formatted(.dateTime.month().day())) 在岗时间") : "本周在岗时间" }
-    private var waterTitle: String { period == .day ? (calendar.isDateInToday(selectedDay) ? "今日饮水量" : "\(selectedDay.formatted(.dateTime.month().day())) 饮水量") : "本周饮水量" }
-    private var primarySeconds: TimeInterval { period == .day ? workSeconds(on: selectedDay) : weekValues.reduce(0, +) }
+    private var currentWorkday: Date { WorkTimerModel.workdayBase(for: model.now) }
+    private var selectedDay: Date { state.selectedDay(currentWorkday: currentWorkday) }
+    private var primaryTitle: String { period == .day ? (isCurrentWorkdaySelected ? "今日在岗时间" : "\(selectedDay.formatted(.dateTime.month().day())) 在岗时间") : "本周在岗时间" }
+    private var waterTitle: String { period == .day ? (isCurrentWorkdaySelected ? "今日饮水量" : "\(selectedDay.formatted(.dateTime.month().day())) 饮水量") : "本周饮水量" }
+    private var primarySeconds: TimeInterval { period == .day ? (dailyPresenceSummary.creditedSeconds ?? 0) : weekValues.reduce(0, +) }
     private var primaryDurationText: String {
-        period == .day && dailyPresenceSummary.creditedSeconds == nil ? "未记录" : duration(primarySeconds)
+        period == .day ? dailyPresenceSummary.creditedSeconds.map(duration) ?? "未记录" : duration(primarySeconds)
     }
     private var compareTitle: String { period == .day ? "与昨天比" : "与上周比" }
     private var compareReference: TimeInterval {
@@ -158,8 +153,8 @@ struct ScreenTimeView: View {
         }
     }
     private var weekAverage: TimeInterval { weekAverage(for: weekStart) }
-    private var isCurrentWaterFocusDay: Bool {
-        workdayKey(forCalendarDay: selectedDay) == WorkTimerModel.workdayKey(for: model.now)
+    private var isCurrentWorkdaySelected: Bool {
+        selectedDay == currentWorkday
     }
     private var waterIntakeSummary: WaterIntakeSummary {
         WaterIntakeSummary(consumedMilliliters: activity.waterMilliliters(workday: workdayKey(forCalendarDay: selectedDay)),
@@ -185,14 +180,13 @@ struct ScreenTimeView: View {
         let key = workdayKey(forCalendarDay: day)
         // 优先使用开始当天已写入的计划工时，避免用户午后修改全局设置而回算当天加班。
         if let saved = activity.workSession(workday: key) { return saved }
-        if key == WorkTimerModel.workdayKey(for: Date()), let start = model.todayStartTime {
+        if key == WorkTimerModel.workdayKey(for: model.now), let start = model.todayStartTime {
             return WorkSession(workday: key, startedAt: start, plannedSeconds: model.workHours * 3600)
         }
         return nil
     }
     private func workSeconds(on day: Date) -> TimeInterval {
-        let todayStart = calendar.startOfDay(for: Date())
-        guard day <= todayStart else { return 0 }
+        guard day <= currentWorkday else { return 0 }
         guard let session = session(on: day) else { return 0 }
         let key = workdayKey(forCalendarDay: day)
         let segments = activity.officePresenceSegments(workday: key)
@@ -227,6 +221,8 @@ struct ScreenTimeView: View {
 
 struct ScreenTimeToolbar: View {
     @ObservedObject var state: ScreenTimeState
+    let currentWorkday: Date
+    private var selectedDay: Date { state.selectedDay(currentWorkday: currentWorkday) }
     private let calendar = Calendar.current
     var body: some View {
         HStack(spacing: 7) {
@@ -234,17 +230,17 @@ struct ScreenTimeToolbar: View {
                 Button("按天查看") { state.period = .day }
                 Button("按周查看") { state.period = .week }
             } label: {
-                Text(state.period == .day ? state.selectedDate.formatted(.dateTime.month().day()) : weekRange)
+                Text(state.period == .day ? selectedDay.formatted(.dateTime.month().day()) : weekRange)
                     .font(.system(size: 13, weight: .medium)).padding(.horizontal, 10).frame(height: 28)
             }.menuStyle(.borderlessButton).fixedSize().settingsHoverFeedback(cornerRadius: 7).accessibilityLabel("选择按天或按周查看")
-            Button { shift(-1) } label: { Image(systemName: "chevron.left") }.buttonStyle(.bordered).settingsHoverFeedback(cornerRadius: 7)
-            Button(state.period == .day ? "今天" : "本周") { state.selectedDate = WorkTimerModel.workdayBase(for: Date()) }.buttonStyle(.bordered).settingsHoverFeedback(cornerRadius: 7)
-            Button { shift(1) } label: { Image(systemName: "chevron.right") }.buttonStyle(.bordered).settingsHoverFeedback(cornerRadius: 7)
+            Button { state.shift(-1, currentWorkday: currentWorkday) } label: { Image(systemName: "chevron.left") }.buttonStyle(.bordered).settingsHoverFeedback(cornerRadius: 7)
+            Button(state.period == .day ? "今天" : "本周") { state.showCurrent() }.buttonStyle(.bordered).settingsHoverFeedback(cornerRadius: 7)
+            Button { state.shift(1, currentWorkday: currentWorkday) } label: { Image(systemName: "chevron.right") }.buttonStyle(.bordered).settingsHoverFeedback(cornerRadius: 7)
         }
     }
     private var weekRange: String {
-        let weekday = calendar.component(.weekday, from: state.selectedDate)
-        let monday = calendar.date(byAdding: .day, value: weekday == 1 ? -6 : 2 - weekday, to: state.selectedDate)!
+        let weekday = calendar.component(.weekday, from: selectedDay)
+        let monday = calendar.date(byAdding: .day, value: weekday == 1 ? -6 : 2 - weekday, to: selectedDay)!
         let sunday = calendar.date(byAdding: .day, value: 6, to: monday)!
         return "\(Self.rangeDateFormatter.string(from: monday)) - \(Self.rangeDateFormatter.string(from: sunday))"
     }
@@ -254,7 +250,6 @@ struct ScreenTimeToolbar: View {
         formatter.dateFormat = "M.d"
         return formatter
     }()
-    private func shift(_ amount: Int) { state.selectedDate = calendar.date(byAdding: .day, value: state.period == .day ? amount : amount * 7, to: state.selectedDate) ?? state.selectedDate }
 }
 
 private struct ScreenTimeCard<Content: View>: View {

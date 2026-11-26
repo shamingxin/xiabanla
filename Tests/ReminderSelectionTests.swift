@@ -11,6 +11,60 @@ func video(_ name: String) -> URL {
     URL(fileURLWithPath: "/tmp/\(name)")
 }
 
+// 导入真实素材，验证同名文件、分类隔离和损坏文件处理。
+do {
+    let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+    var imported: [URL] = []
+    defer {
+        for url in imported { try? FileManager.default.removeItem(at: url) }
+        try? FileManager.default.removeItem(at: temporary)
+    }
+    let source = temporary.appendingPathComponent("import-test-\(UUID().uuidString).mp4")
+    try FileManager.default.copyItem(at: URL(fileURLWithPath: "Assets/Videos/喝水/喝水.mp4"), to: source)
+    let first = try VideoLibrary.importFile(source, for: .water)
+    imported.append(first)
+    let second = try VideoLibrary.importFile(source, for: .water)
+    imported.append(second)
+    check("同名导入保留两份素材", first != second && FileManager.default.fileExists(atPath: first.path))
+    check("导入素材进入喝水列表", VideoLibrary.videos(.water).contains(first))
+    check("喝水素材不混入休息列表", !VideoLibrary.videos(.egg).contains(first))
+    var largeVideo = try Data(contentsOf: source)
+    largeVideo.append(Data(count: 6 * 1024 * 1024))
+    try largeVideo.write(to: source)
+    let compressed = try VideoLibrary.importFile(URL(fileURLWithPath: source.path), for: .offWork)
+    imported.append(compressed)
+    check("大视频导入后压缩体积", try Data(contentsOf: compressed).count < largeVideo.count)
+    check("压缩后输出 MP4", compressed.pathExtension == "mp4")
+    check("压缩不改写用户原文件", try Data(contentsOf: source).count == largeVideo.count)
+    try FileManager.default.removeItem(at: source)
+    check("原文件移除后导入素材仍可读取", (try? Data(contentsOf: first)) != nil)
+    let invalid = temporary.appendingPathComponent("invalid.mp4")
+    try Data("invalid".utf8).write(to: invalid)
+    do {
+        let unexpected = try VideoLibrary.importFile(invalid, for: .offWork)
+        imported.append(unexpected)
+        check("损坏视频拒绝导入", false)
+    } catch { check("损坏视频拒绝导入", true) }
+} catch { check("真实素材导入成功", false) }
+
+let namesSuite = "xiabanla.names.tests." + UUID().uuidString
+let namesDefaults = UserDefaults(suiteName: namesSuite)!
+defer { namesDefaults.removePersistentDomain(forName: namesSuite) }
+let namedVideo = video("original.mp4")
+VideoLibrary.rename(namedVideo, kind: .water, name: "  我的提醒  ", defaults: namesDefaults)
+check("重命名保存去除首尾空白后的名称",
+      VideoLibrary.displayName(namedVideo, kind: .water, defaults: namesDefaults) == "我的提醒")
+check("重命名按提醒分类独立保存",
+      VideoLibrary.displayName(namedVideo, kind: .egg, defaults: namesDefaults) == "original")
+VideoLibrary.rename(namedVideo, kind: .water, name: "  ", defaults: namesDefaults)
+check("空名称保留原名", VideoLibrary.displayName(namedVideo, kind: .water, defaults: namesDefaults) == "我的提醒")
+try! VideoLibrary.delete(namedVideo, kind: .water, defaults: namesDefaults)
+check("删除内置动画保存隐藏状态",
+      namesDefaults.stringArray(forKey: "reminder.water.hiddenVideos") == ["bundled:original.mp4"])
+check("删除同时清理自定义名称",
+      VideoLibrary.displayName(namedVideo, kind: .water, defaults: namesDefaults) == "original")
+
 let available = [video("a.mp4"), video("b.mp4"), video("c.mp4")]
 
 let defaultSelection = VideoSelectionState.selectedNames(saved: nil, available: available)

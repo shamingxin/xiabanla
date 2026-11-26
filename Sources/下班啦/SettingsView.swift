@@ -470,6 +470,8 @@ struct SettingsView: View {
     }
 
     /// 紧凑动画库：已选动画才进入提醒和预览的随机池。
+    @State private var importingAnimations = false
+
     private func animationLibrary(_ kind: ReminderKind) -> some View {
         let videos = reminders.videos(kind)
         let selectedCount = reminders.selectedVideoNames(kind).count
@@ -491,7 +493,6 @@ struct SettingsView: View {
                     }
                 }
                 .controlSize(.regular)
-                .disabled(videos.isEmpty)
                 .buttonStyle(GlassActionButtonStyle())
                 .settingsHoverFeedback(cornerRadius: 14)
                 Button("预览动画") { reminders.preview(kind) }
@@ -502,15 +503,12 @@ struct SettingsView: View {
             }
 
             if libraryExpansion.isExpanded(kind) {
-                if videos.isEmpty {
-                    Text("暂无可用动画。")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                } else {
+                Group {
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 7), count: 5), spacing: 7) {
                         ForEach(videos, id: \.self) { url in
                             ReminderAnimationThumbnail(
                                 url: url,
+                                displayName: VideoLibrary.displayName(url, kind: kind),
                                 selected: reminders.isVideoSelected(url, for: kind),
                                 accent: accent,
                                 palette: palette
@@ -519,15 +517,100 @@ struct SettingsView: View {
                                     showToast("至少保留一个动画。", duration: 2)
                                 }
                             }
+                            .contextMenu {
+                                Button("预览") { reminders.preview(url) }
+                                Button("重命名") { renameAnimation(url, kind: kind) }
+                                Divider()
+                                Button("删除", role: .destructive) {
+                                    do { try reminders.deleteVideo(url, kind: kind) }
+                                    catch { showToast("删除失败，请稍后重试。") }
+                                }
+                            }
                         }
+                        Button { importAnimations(kind) } label: {
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(palette.card)
+                                .aspectRatio(1, contentMode: .fit)
+                                .overlay {
+                                    Image(systemName: importingAnimations ? "hourglass" : "plus")
+                                        .font(.system(size: 22, weight: .light))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(palette.separator, lineWidth: 1))
+                                .contentShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                        .settingsHoverFeedback(cornerRadius: 8)
+                        .disabled(importingAnimations)
+                        .help("添加 GIF 或视频")
+                        .accessibilityLabel("添加提醒动画")
                     }
                 }
+                Text("建议尺寸 1:1，动画修改仅在本电脑生效。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(.horizontal, SettingsMetrics.inset)
         .padding(.vertical, 12)
     }
 
+
+    private func renameAnimation(_ url: URL, kind: ReminderKind) {
+        let alert = NSAlert()
+        alert.messageText = "重命名动画"
+        alert.addButton(withTitle: "保存")
+        alert.addButton(withTitle: "取消")
+        let field = NSTextField(string: VideoLibrary.displayName(url, kind: kind))
+        field.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        let completion: (NSApplication.ModalResponse) -> Void = { response in
+            guard response == .alertFirstButtonReturn else { return }
+            let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else {
+                showToast("名称不能为空。")
+                return
+            }
+            reminders.renameVideo(url, kind: kind, name: name)
+        }
+        if let window = NSApp.keyWindow {
+            alert.beginSheetModal(for: window, completionHandler: completion)
+        } else {
+            completion(alert.runModal())
+        }
+    }
+
+    private func importAnimations(_ kind: ReminderKind) {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.mpeg4Movie, .quickTimeMovie, .gif, UTType(filenameExtension: "m4v")!]
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.prompt = "添加"
+        panel.message = "添加 GIF、MP4、MOV 或 M4V，导入后自动选中。"
+        panel.begin { response in
+            guard response == .OK else { return }
+            importingAnimations = true
+            let sources = panel.urls
+            DispatchQueue.global(qos: .userInitiated).async {
+                var imported: [URL] = []
+                var failed: [String] = []
+                for source in sources {
+                    let access = source.startAccessingSecurityScopedResource()
+                    defer { if access { source.stopAccessingSecurityScopedResource() } }
+                    do { imported.append(try VideoLibrary.importFile(source, for: kind)) }
+                    catch { failed.append(source.lastPathComponent) }
+                }
+                DispatchQueue.main.async {
+                    reminders.includeImportedVideos(imported, for: kind)
+                    importingAnimations = false
+                    if !failed.isEmpty {
+                        showToast("无法导入 " + failed.joined(separator: "、") + "，请检查文件是否可播放。", duration: 5)
+                    }
+                }
+            }
+        }
+    }
 
     private static func minutesText(_ m: Int) -> String {
         m >= 60 && m % 60 == 0 ? "每 \(m / 60) 小时" : (m > 60 ? "每 \(m / 60) 小时 \(m % 60) 分" : "每 \(m) 分钟")
@@ -575,6 +658,7 @@ private enum ReminderThumbnailCache {
 /// 内置提醒视频的紧凑缩略图。首帧异步解码，解码失败时保持中性占位图。
 private struct ReminderAnimationThumbnail: View {
     let url: URL
+    let displayName: String
     let selected: Bool
     let accent: Color
     let palette: SettingsPalette
@@ -582,14 +666,18 @@ private struct ReminderAnimationThumbnail: View {
 
     @State private var thumbnail: NSImage?
 
-    private var displayName: String {
-        url.deletingPathExtension().lastPathComponent
-    }
 
     var body: some View {
         Button(action: action) {
-            ZStack(alignment: .topTrailing) {
-                thumbnailContent
+            Rectangle()
+                .fill(palette.card)
+                .aspectRatio(1, contentMode: .fit)
+                .overlay {
+                    GeometryReader { geometry in
+                        thumbnailContent(size: geometry.size)
+                    }
+                }
+                .overlay(alignment: .topTrailing) {
                 Image(systemName: selected ? "checkmark" : "plus")
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(selected ? accent.contrastingText : .secondary)
@@ -597,8 +685,6 @@ private struct ReminderAnimationThumbnail: View {
                     .background(Circle().fill(selected ? accent : palette.chevronBase))
                     .padding(5)
             }
-            .frame(maxWidth: .infinity)
-            .aspectRatio(1.38, contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -616,11 +702,13 @@ private struct ReminderAnimationThumbnail: View {
     }
 
     @ViewBuilder
-    private var thumbnailContent: some View {
+    private func thumbnailContent(size: CGSize) -> some View {
         if let thumbnail {
             Image(nsImage: thumbnail)
                 .resizable()
                 .scaledToFill()
+                .frame(width: size.width, height: size.height)
+                .clipped()
                 .overlay(alignment: .bottomLeading) {
                     Text(displayName)
                         .font(.system(size: 9, weight: .semibold))
@@ -648,6 +736,10 @@ private struct ReminderAnimationThumbnail: View {
 
     private func loadThumbnail() {
         guard thumbnail == nil else { return }
+        if url.pathExtension.lowercased() == "gif" {
+            thumbnail = NSImage(contentsOf: url)
+            return
+        }
         let videoURL = url
         if let cached = ReminderThumbnailCache.images.object(forKey: videoURL as NSURL) {
             thumbnail = cached

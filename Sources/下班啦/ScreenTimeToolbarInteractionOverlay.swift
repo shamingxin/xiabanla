@@ -11,7 +11,7 @@ struct SettingsToolbarTitlebarAccessory: View {
     var body: some View {
         HStack(spacing: 0) {
             ZStack(alignment: .trailing) {
-                ScreenTimeToolbar(state: screenTimeState)
+                ScreenTimeToolbar(state: screenTimeState, currentWorkday: WorkTimerModel.workdayBase(for: model.now))
                     .opacity(navigation.selectedSection == .screenTime ? 1 : 0)
                     .allowsHitTesting(navigation.selectedSection == .screenTime)
                 ReminderTabTitlebarAccessory(navigation: navigation, isDark: model.background == .dark)
